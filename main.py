@@ -1,11 +1,10 @@
 import click
 import ltn
 import torch
-import torchvision
-import torchvision.transforms as transforms
 from torch import nn
 from torch.nn import functional as F
 from tqdm import trange, tqdm
+from make_dataloader import get_loaders
 
 
 class SudokuNet(nn.Module):
@@ -40,34 +39,11 @@ class SudokuNet(nn.Module):
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
 @click.option('--dataset', default='mnist', help='Dataset to use.')
-def main(epochs, batch_size, n_classes, lr, log_interval, dataset):
+@click.option('--path', default='', help='Path for dataset')
+def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # TODO: Dataset
-    match dataset:
-        case 'mnist':
-            #TODO: MNIST
-            transform = transforms.Compose(
-                [transforms.ToTensor(),
-                 transforms.Normalize((0.1307,), (0.3081,))])
-
-            trainset = torchvision.datasets.MNIST(root='./data', train=True,
-                                                  download=True, transform=transform)
-
-            train_set, val_set = torch.utils.data.random_split(trainset, [50000, 10000])
-
-            trainloader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                                      shuffle=True, num_workers=2)
-
-            valloader = torch.utils.data.DataLoader(val_set, batch_size=batch_size,
-                                                    shuffle=False, num_workers=2)
-
-            testset = torchvision.datasets.MNIST(root='./data', train=False,
-                                                 download=True, transform=transform)
-            testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                                     shuffle=False, num_workers=2)
-        case _:
-            raise ValueError(f"Dataset {dataset} not supported.")
+    trainloader, valloader, testloader = get_loaders(path, batch_size, type=dataset)
 
     Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
     And = ltn.Connective(ltn.fuzzy_ops.AndProd())
