@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset
 import torchvision
 import torchvision.transforms as transforms
+from PIL import Image
 
 class sudoku_dataset(Dataset):
     def __init__(self, path, train=False, transform=None, type=4):
@@ -18,7 +19,7 @@ class sudoku_dataset(Dataset):
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             pixels = []
-                            for c in range(16):
+                            for c in range(type*type):
                                 step = 28 * 28
                                 number = l.split("\t")[c * step:c * step + step]
                                 pixels.append([float(n) for n in number])
@@ -27,7 +28,7 @@ class sudoku_dataset(Dataset):
                 if "train_cell_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
-                            cells = [((c % 4, c // 4), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                            cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
                             samples_cells.append(cells)
 
                 if "train_puzzle_labels" in f:
@@ -41,8 +42,16 @@ class sudoku_dataset(Dataset):
         self.samples = samples
     def __getitem__(self, index):
         item = self.samples[index]
-        # TODO: transforms
-        return item[0:1], item[2]
+        imgs = []
+        for n in item[0]:
+            img = Image.fromarray(n.numpy(), mode="L")
+
+            if self.transform is not None:
+                img = self.transform(img)
+
+            imgs.append(img)
+
+        return imgs, item[1], item[2]
 
 def  get_loaders(path, batch_size, type="mnist"):
 
