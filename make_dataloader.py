@@ -9,21 +9,40 @@ class sudoku_dataset(Dataset):
     def __init__(self, path, train=False, transform=None, type=4):
         self.transform = transform
         self.type = type
-        # TODO: transforms
-        samples = []
+        samples_cells = []
+        samples_pixels = []
+        samples_labels = []
         for root, dirs, files in os.walk(os.path.join(path)):
             for f in files:
+                if "train_puzzle_pixels" in f:
+                    with open(os.path.join(path, root, f), "r") as liner:
+                        for i, l in enumerate(liner.readlines()):
+                            pixels = []
+                            for c in range(16):
+                                step = 28 * 28
+                                number = l.split("\t")[c * step:c * step + step]
+                                pixels.append([float(n) for n in number])
+                            samples_pixels.append(pixels)
+
                 if "train_cell_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
-                            sample = [((c % 4, c // 4), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
-                            samples.append((sample, i))
+                            cells = [((c % 4, c // 4), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                            samples_cells.append(cells)
+
+                if "train_puzzle_labels" in f:
+                    with open(os.path.join(path, root, f), "r") as liner:
+                        for i, l in enumerate(liner.readlines()):
+                            label = 0 if l.split("\t")[0] == "1" else 0
+                            samples_labels.append(label)
+
+        samples = [(p, c, l) for c, p, l in zip(samples_cells, samples_pixels, samples_labels)]
 
         self.samples = samples
     def __getitem__(self, index):
         item = self.samples[index]
         # TODO: transforms
-        return item[0], item[1]
+        return item[0:1], item[2]
 
 def  get_loaders(path, batch_size, type="mnist"):
 
