@@ -30,7 +30,8 @@ class sudoku_dataset(Dataset):
                 if tr_va_te+"_cell_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
-                            cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                            # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                            cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
                             samples_cells.append(cells)
                             if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
                                 break
@@ -43,7 +44,7 @@ class sudoku_dataset(Dataset):
                             if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
                                 break
 
-        samples = [(p, c, l) for c, p, l in zip(samples_cells, samples_pixels, samples_labels)]
+        samples = [(p, c, l) for p, c, l in zip(samples_pixels, samples_cells, samples_labels)]
 
         self.samples = samples
 
@@ -53,14 +54,16 @@ class sudoku_dataset(Dataset):
         item = self.samples[index]
         imgs = []
         for n in item[0]:
-            img = Image.fromarray(np.array(n), mode="L")
+            img = Image.fromarray(np.reshape(np.array(n), (28,28)), mode="L")
 
             if self.transform is not None:
                 img = self.transform(img)
 
             imgs.append(img)
-
-        return imgs, item[1], item[2]
+        imgs = torch.cat(imgs)
+        labels = torch.tensor(np.array(item[1]))
+        sudoku_label = item[2]
+        return imgs, labels, sudoku_label
 
 def  get_loaders(path, batch_size, type="mnist"):
 

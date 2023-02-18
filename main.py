@@ -19,15 +19,17 @@ class SudokuNet(nn.Module):
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, self.n_classes)
 
-    def forward(self, x):
+    def forward(self, x, l):
         original_batch_size = x.shape[0]
         x = x.reshape(original_batch_size, self.n_classes * self.n_classes, 28, 28).reshape(-1, 1, 28, 28)
+        l = l.reshape(original_batch_size, self.n_classes * self.n_classes, self.n_classes).reshape(-1, 1, self.n_classes)
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x).softmax(dim=-2)
+        out = torch.sum(x * l, dim=1)
         # x = x.argmax(dim=-1)
         return x.reshape(original_batch_size, self.n_classes, self.n_classes, self.n_classes)
 
@@ -76,10 +78,17 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
     for epoch in trange(epochs):
-        for (batch_idx, (batch)) in enumerate(tqdm(trainloader, leave=False)):
-            x, _ = batch
+        for (batch_idx, batch) in enumerate(tqdm(trainloader, leave=False)):
+            x, labels, _ = batch
             x.to(device)
-            x = cnn(ltn.Variable("image", x))
+            labels.to(device)
+
+            onehot_labels = torch.nn.functional.one_hot(labels, num_classes=n_classes)
+
+            x = ltn.Variable("image", x)
+            l = ltn.Variable("l", onehot_labels)
+
+            x = cnn(x, l)
             optimizer.zero_grad()
             loss = 1. - Forall([x1, y1, x2, y2],
                                Implies(And(Not(SameSquare(x1, y1, x2, y2)), And(Not(SamePoint(x1, y1, x2, y2)),
