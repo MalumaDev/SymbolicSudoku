@@ -40,6 +40,9 @@ class sudoku_dataset(Dataset):
         samples = [(p, c, l) for c, p, l in zip(samples_cells, samples_pixels, samples_labels)]
 
         self.samples = samples
+
+    def len(self):
+        return len(self.samples)
     def __getitem__(self, index):
         item = self.samples[index]
         imgs = []
@@ -73,12 +76,13 @@ def  get_loaders(path, batch_size, type="mnist"):
                                                  download=True, transform=transform)
 
         case 'sudoku4':
-            trainset = sudoku_dataset(path='./data', train=True,
-                                      transform=transform)
+            train_set = sudoku_dataset(path='./data', tr_ta_te="train",
+                                       transform=transform)
 
-            train_set, val_set = torch.utils.data.random_split(trainset, [50000, 10000])
+            val_set = sudoku_dataset(path='./data', tr_ta_te="val",
+                                     transform=transform)
 
-            testset = sudoku_dataset(path='./data', train=False,
+            testset = sudoku_dataset(path='./data', tr_ta_te="test",
                                      transform=transform)
         case _:
             raise ValueError(f"Dataset {type} not supported.")
