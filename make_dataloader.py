@@ -24,18 +24,24 @@ class sudoku_dataset(Dataset):
                                 number = l.split("\t")[c * step:c * step + step]
                                 pixels.append([float(n) for n in number])
                             samples_pixels.append(pixels)
+                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                break
 
                 if tr_va_te+"_cell_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
                             samples_cells.append(cells)
+                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                break
 
                 if tr_va_te+"_puzzle_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             label = 0 if l.split("\t")[0] == "1" else 0
                             samples_labels.append(label)
+                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                break
 
         samples = [(p, c, l) for c, p, l in zip(samples_cells, samples_pixels, samples_labels)]
 
