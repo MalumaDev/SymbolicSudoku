@@ -68,6 +68,9 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
         func=lambda image, x1, y1, x2, y2: torch.exp(
             -1. * ((image[:, x1, y1] - image[:, x2, y2]) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
+    Digit = ltn.Predicate(
+        func=lambda image, x, y, l: (image[:, x, y] * l[:, x * len(l) + y]).sum(-1))
+
     sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2))
 
     cnn = ltn.Function(SudokuNet(n_classes=n_classes))
@@ -92,12 +95,13 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             optimizer.zero_grad()
             loss = 1. - Forall([x1, y1, x2, y2],
                             Implies(And(Not(SameSquare(x1, y1, x2, y2)),
-                                        And(Not(SamePoint(x1, y1, x2, y2)),  
-                                                                            Or(EqualPosition(x1, x2),
-                                                                                EqualPosition(y1, y2)))),
+                                        And(Not(SamePoint(x1, y1, x2, y2)),
+                                            Or(EqualPosition(x1, x2),
+                                                EqualPosition(y1, y2)))),
                                         # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
                                         # Not(And(EqualLine(x1, y1, x2, y2),
-                                        #         EqualLine(y1, x1, y2, x2)))),
+                                        #         EqualLine(y1, x1, y2, x2))),
+                                        #          Digit(x1, y1, l), Digit(x2,y2, l))),
                                     Not(
                                         EqualImageNumber(result, x1, y1, x2, y2)))
                             ).value.mean()
