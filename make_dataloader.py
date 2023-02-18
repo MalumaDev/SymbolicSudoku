@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 from PIL import Image
 
 class sudoku_dataset(Dataset):
-    def __init__(self, path, train=False, transform=None, type=4):
+    def __init__(self, path, tr_va_te="train", transform=None, type=4):
         self.transform = transform
         self.type = type
         samples_cells = []
@@ -15,7 +15,7 @@ class sudoku_dataset(Dataset):
         samples_labels = []
         for root, dirs, files in os.walk(os.path.join(path)):
             for f in files:
-                if "train_puzzle_pixels" in f:
+                if tr_va_te+"_puzzle_pixels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             pixels = []
@@ -25,13 +25,13 @@ class sudoku_dataset(Dataset):
                                 pixels.append([float(n) for n in number])
                             samples_pixels.append(pixels)
 
-                if "train_cell_labels" in f:
+                if tr_va_te+"_cell_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
                             samples_cells.append(cells)
 
-                if "train_puzzle_labels" in f:
+                if tr_va_te+"_puzzle_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             label = 0 if l.split("\t")[0] == "1" else 0
@@ -41,7 +41,7 @@ class sudoku_dataset(Dataset):
 
         self.samples = samples
 
-    def len(self):
+    def __len__(self):
         return len(self.samples)
     def __getitem__(self, index):
         item = self.samples[index]
@@ -76,13 +76,13 @@ def  get_loaders(path, batch_size, type="mnist"):
                                                  download=True, transform=transform)
 
         case 'sudoku4':
-            train_set = sudoku_dataset(path='./data', tr_ta_te="train",
+            train_set = sudoku_dataset(path=path, tr_va_te="train",
                                        transform=transform)
 
-            val_set = sudoku_dataset(path='./data', tr_ta_te="val",
+            val_set = sudoku_dataset(path=path, tr_va_te="val",
                                      transform=transform)
 
-            testset = sudoku_dataset(path='./data', tr_ta_te="test",
+            testset = sudoku_dataset(path=path, tr_va_te="test",
                                      transform=transform)
         case _:
             raise ValueError(f"Dataset {type} not supported.")
