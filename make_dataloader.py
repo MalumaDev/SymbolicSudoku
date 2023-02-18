@@ -53,7 +53,7 @@ class sudoku_dataset(Dataset):
         item = self.samples[index]
         imgs = []
         for n in item[0]:
-            img = Image.fromarray(n.numpy(), mode="L")
+            img = Image.fromarray(np.array(n), mode="L")
 
             if self.transform is not None:
                 img = self.transform(img)
