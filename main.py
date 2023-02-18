@@ -88,15 +88,19 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             x = ltn.Variable("image", x)
             l = ltn.Variable("l", onehot_labels)
 
-            x = cnn(x, l)
+            result = cnn(x, l)
             optimizer.zero_grad()
             loss = 1. - Forall([x1, y1, x2, y2],
-                               Implies(And(Not(SameSquare(x1, y1, x2, y2)), And(Not(SamePoint(x1, y1, x2, y2)),
-                                                                                Or(EqualPosition(x1, x2),
-                                                                                   EqualPosition(y1, y2)))),
-                                       Not(
-                                           EqualImageNumber(x, x1, y1, x2, y2)))
-                               ).value.mean()
+                            Implies(And(Not(SameSquare(x1, y1, x2, y2)),
+                                        And(Not(SamePoint(x1, y1, x2, y2)),  
+                                                                            Or(EqualPosition(x1, x2),
+                                                                                EqualPosition(y1, y2)))),
+                                        # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
+                                        # Not(And(EqualLine(x1, y1, x2, y2),
+                                        #         EqualLine(y1, x1, y2, x2)))),
+                                    Not(
+                                        EqualImageNumber(result, x1, y1, x2, y2)))
+                            ).value.mean()
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
