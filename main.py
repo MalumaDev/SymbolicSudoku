@@ -19,15 +19,17 @@ class SudokuNet(nn.Module):
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, self.n_classes)
 
-    def forward(self, x):
+    def forward(self, x, l):
         original_batch_size = x.shape[0]
         x = x.reshape(original_batch_size, self.n_classes * self.n_classes, 28, 28).reshape(-1, 1, 28, 28)
+        l = l.reshape(original_batch_size, self.n_classes * self.n_classes, self.n_classes).reshape(-1, 1, self.n_classes)
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x).softmax(dim=-2)
+        out = torch.sum(x * l, dim=1)
         # x = x.argmax(dim=-1)
         return x.reshape(original_batch_size, self.n_classes, self.n_classes, self.n_classes)
 
@@ -66,6 +68,9 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
         func=lambda image, x1, y1, x2, y2: torch.exp(
             -1. * ((image[:, x1, y1] - image[:, x2, y2]) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
+    Digit = ltn.Predicate(
+        func=lambda image, x, y, l: (image[:, x, y] * l[:, x * len(l) + y]).sum(-1))
+
     sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2))
 
     cnn = ltn.Function(SudokuNet(n_classes=n_classes))
@@ -76,18 +81,30 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
     for epoch in trange(epochs):
-        for (batch_idx, (batch)) in enumerate(tqdm(trainloader, leave=False)):
-            x, _ = batch
+        for (batch_idx, batch) in enumerate(tqdm(trainloader, leave=False)):
+            x, labels, _ = batch
             x.to(device)
-            x = cnn(ltn.Variable("image", x))
+            labels.to(device)
+
+            onehot_labels = torch.nn.functional.one_hot(labels, num_classes=n_classes)
+
+            x = ltn.Variable("image", x)
+            l = ltn.Variable("l", onehot_labels)
+
+            result = cnn(x, l)
             optimizer.zero_grad()
             loss = 1. - Forall([x1, y1, x2, y2],
-                               Implies(And(Not(SameSquare(x1, y1, x2, y2)), And(Not(SamePoint(x1, y1, x2, y2)),
-                                                                                Or(EqualPosition(x1, x2),
-                                                                                   EqualPosition(y1, y2)))),
-                                       Not(
-                                           EqualImageNumber(x, x1, y1, x2, y2)))
-                               ).value.mean()
+                            Implies(And(Not(SameSquare(x1, y1, x2, y2)),
+                                        And(Not(SamePoint(x1, y1, x2, y2)),
+                                            Or(EqualPosition(x1, x2),
+                                                EqualPosition(y1, y2)))),
+                                        # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
+                                        # Not(And(EqualLine(x1, y1, x2, y2),
+                                        #         EqualLine(y1, x1, y2, x2))),
+                                        #          Digit(x1, y1, l), Digit(x2,y2, l))),
+                                    Not(
+                                        EqualImageNumber(result, x1, y1, x2, y2)))
+                            ).value.mean()
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
