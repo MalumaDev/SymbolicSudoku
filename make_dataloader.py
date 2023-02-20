@@ -16,7 +16,7 @@ class sudoku_dataset(Dataset):
         for root, dirs, files in os.walk(os.path.join(path)):
             for f in files:
                 if tr_va_te+"_puzzle_pixels" in f:
-                    with open(os.path.join(path, root, f), "r") as liner:
+                    with open(os.path.join(root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             pixels = []
                             for c in range(type*type):
@@ -28,7 +28,7 @@ class sudoku_dataset(Dataset):
                                 break
 
                 if tr_va_te+"_cell_labels" in f:
-                    with open(os.path.join(path, root, f), "r") as liner:
+                    with open(os.path.join(root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
                             cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
@@ -37,7 +37,7 @@ class sudoku_dataset(Dataset):
                                 break
 
                 if tr_va_te+"_puzzle_labels" in f:
-                    with open(os.path.join(path, root, f), "r") as liner:
+                    with open(os.path.join( root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             label = 0 if l.split("\t")[0] == "1" else 0
                             samples_labels.append(label)
