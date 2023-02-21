@@ -42,8 +42,8 @@ class SudokuNet(nn.Module):
 @click.option('--n_classes', default=4, help='Number of classes.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
-@click.option('--dataset', default='mnist', help='Dataset to use.')
-@click.option('--path', default='', help='Path for dataset')
+@click.option('--dataset', default='sudoku4', help='Dataset to use.')
+@click.option('--path', default='data/MNISTx4Sudoku', help='Path for dataset')
 def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
