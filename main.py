@@ -18,20 +18,22 @@ class SudokuNet(nn.Module):
         self.fc1 = nn.Linear(16 * 4 * 4, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, self.n_classes)
+        self.fc4 = nn.Linear(self.n_classes * self.n_classes * 84, 2)
 
-    def forward(self, x, l):
+    def forward(self, x):
         original_batch_size = x.shape[0]
         x = x.reshape(original_batch_size, self.n_classes * self.n_classes, 28, 28).reshape(-1, 1, 28, 28)
-        l = l.reshape(original_batch_size, self.n_classes * self.n_classes, self.n_classes).reshape(-1, 1, self.n_classes)
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        x = self.fc3(x).softmax(dim=-2)
-        out = torch.sum(x * l, dim=1)
+        cells = self.fc3(x).softmax(dim=-2)
+        cells = cells.reshape(original_batch_size, self.n_classes, self.n_classes, self.n_classes)
+        puzzle = x.reshape(original_batch_size, -1)
+        puzzle = self.fc4(x).softmax(dim=-1)
         # x = x.argmax(dim=-1)
-        return x.reshape(original_batch_size, self.n_classes, self.n_classes, self.n_classes)
+        return cells
 
 
 @click.command()
@@ -64,47 +66,79 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             F.one_hot(y1, num_classes=n_classes) * F.one_hot(y2, num_classes=n_classes))).sum(-1))
     SameSquare = ltn.Predicate(func=lambda x1, y1, x2, y2: (x1 // 3 == x2 // 3) * (y1 // 3 == y2 // 3))
     EqualPosition = ltn.Predicate(func=lambda x1, x2: x1 == x2)
+
+    EqualLine = ltn.Predicate(func=lambda x1, y1, x2, y2: ((x1 == x2) * (y1 != y2)))
+
     EqualImageNumber = ltn.Predicate(
         func=lambda image, x1, y1, x2, y2: torch.exp(
             -1. * ((image[:, x1, y1] - image[:, x2, y2]) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
     Digit = ltn.Predicate(
-        func=lambda image, x, y, l: (image[:, x, y] * l[:, x * len(l) + y]).sum(-1))
+        func=lambda image, label: torch.exp(
+            -1. * ((image * label) ** 2).reshape(image.shape[0], -1).sum(-1)))
+
+    isCorrect = ltn.Predicate(
+        func=lambda image, l: (image * l).sum(-1))
 
     sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2))
 
-    cnn = ltn.Function(SudokuNet(n_classes=n_classes))
+    cnn = SudokuNet(n_classes=n_classes)
     cnn.to(device)
 
     x1, x2, y1, y2 = (ltn.Variable(f"p{i}", torch.arange(n_classes)) for i in range(4))
+    correct = ltn.Constant(torch.tensor(1))
+    wrong = ltn.Constant(torch.tensor(0))
 
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
     for epoch in trange(epochs):
         for (batch_idx, batch) in enumerate(tqdm(trainloader, leave=False)):
-            x, labels, _ = batch
+            x, labels, sudoku_label = batch
             x.to(device)
             labels.to(device)
+            sudoku_label.to(device)
 
             onehot_labels = torch.nn.functional.one_hot(labels, num_classes=n_classes)
+            onehot_labels = onehot_labels.reshape(batch_size, n_classes, n_classes, n_classes)
 
-            x = ltn.Variable("image", x)
             l = ltn.Variable("l", onehot_labels)
-
-            result = cnn(x, l)
+            s = ltn.Variable("s", sudoku_label)
+            result = cnn(x)
+            result = ltn.Variable("result", result)
             optimizer.zero_grad()
-            loss = 1. - Forall([x1, y1, x2, y2],
-                            Implies(And(Not(SameSquare(x1, y1, x2, y2)),
-                                        And(Not(SamePoint(x1, y1, x2, y2)),
-                                            Or(EqualPosition(x1, x2),
-                                                EqualPosition(y1, y2)))),
-                                        # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
-                                        # Not(And(EqualLine(x1, y1, x2, y2),
-                                        #         EqualLine(y1, x1, y2, x2))),
-                                        #          Digit(x1, y1, l), Digit(x2,y2, l))),
-                                    Not(
-                                        EqualImageNumber(result, x1, y1, x2, y2)))
-                            ).value.mean()
+            loss = 1. - sat_agg(
+                Forall(s,
+                       Forall([x1, y1, x2, y2],
+                              Implies(And(Not(SameSquare(x1, y1, x2, y2)),
+                                          # And(Not(SamePoint(x1, y1, x2, y2)),
+                                          #     Or(EqualPosition(x1, x2),
+                                          #         EqualPosition(y1, y2)))),
+                                          # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
+                                          Not(And(EqualLine(x1, y1, x2, y2),
+                                                  EqualLine(y1, x1, y2, x2)))),
+                                      Not(
+                                          EqualImageNumber(result, x1, y1, x2, y2)))),
+                       cond_vars=[s],
+                       cond_fn=lambda s: s.value == correct.value,
+                       ).value.mean(),
+
+                Forall(s,
+                       Exists([x1, y1, x2, y2],
+                              Implies(And(Not(SameSquare(x1, y1, x2, y2)),
+                                          # And(Not(SamePoint(x1, y1, x2, y2)),
+                                          #     Or(EqualPosition(x1, x2),
+                                          #         EqualPosition(y1, y2)))),
+                                          Not(And(EqualLine(x1, y1, x2, y2),
+                                                  EqualLine(y1, x1, y2, x2)))),
+                                      EqualImageNumber(result, x1, y1, x2, y2))),
+                       cond_vars=[s],
+                       cond_fn=lambda s: s.value == wrong.value,
+                       ).value.mean(),
+
+                Forall(
+                    ltn.diag(result, l),
+                    Digit(result, l)).value
+                    )
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")

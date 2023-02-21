@@ -39,7 +39,7 @@ class sudoku_dataset(Dataset):
                 if tr_va_te+"_puzzle_labels" in f:
                     with open(os.path.join(path, root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
-                            label = 0 if l.split("\t")[0] == "1" else 0
+                            label = 1 if l.split("\t")[0] == "1" else 0
                             samples_labels.append(label)
                             if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
                                 break
