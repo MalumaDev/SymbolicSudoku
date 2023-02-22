@@ -75,11 +75,11 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
     Digit = ltn.Predicate(
         func=lambda image, label: torch.exp(
-            -1. * ((image * label) ** 2).reshape(image.shape[0], -1).sum(-1)))
+            -1. * ((image - label) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
     isCorrect = ltn.Predicate(
         func=lambda image, label: torch.exp(
-            -1. * ((image * label) ** 2).reshape(image.shape[0], -1).sum(-1)))
+            -1. * ((image - label) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
     sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2))
 
@@ -93,6 +93,7 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
     for epoch in trange(epochs):
+        train_acc = 0
         for (batch_idx, batch) in enumerate(tqdm(trainloader, leave=False)):
             x, labels, sudoku_label = batch
             x.to(device)
@@ -108,20 +109,20 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             sl = ltn.Variable("sl", onehot_sudoku_label)
 
             result, prediction = cnn(x)
-
             result = ltn.Variable("result", result)
             prediction = ltn.Variable("prediction", prediction)
+
             optimizer.zero_grad()
             loss = 1. - sat_agg(
                 Forall(s,
                        Forall([x1, y1, x2, y2],
-                              Implies(And(Not(SameSquare(x1, y1, x2, y2)),
-                                          # And(Not(SamePoint(x1, y1, x2, y2)),
-                                          #     Or(EqualPosition(x1, x2),
-                                          #         EqualPosition(y1, y2)))),
-                                          # # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
-                                          Not(And(EqualLine(x1, y1, x2, y2),
-                                                  EqualLine(y1, x1, y2, x2)))),
+                              Implies(Or(Or(SameSquare(x1, y1, x2, y2),
+                                            # And(Not(SamePoint(x1, y1, x2, y2)),
+                                            #     Or(EqualPosition(x1, x2),
+                                            #         EqualPosition(y1, y2)))),
+                                            # Abbiamo modificato creando una Not And per ridurre il numero di predicati da 3 a 2
+                                            EqualLine(x1, y1, x2, y2)),
+                                         EqualLine(y1, x1, y2, x2)),
                                       Not(
                                           EqualImageNumber(result, x1, y1, x2, y2)))),
                        cond_vars=[s],
@@ -130,12 +131,12 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
                 Forall(s,
                        Exists([x1, y1, x2, y2],
-                              Implies(And(Not(SameSquare(x1, y1, x2, y2)),
-                                          # And(Not(SamePoint(x1, y1, x2, y2)),
-                                          #     Or(EqualPosition(x1, x2),
-                                          #         EqualPosition(y1, y2)))),
-                                          Not(And(EqualLine(x1, y1, x2, y2),
-                                                  EqualLine(y1, x1, y2, x2)))),
+                              Implies(Or(Or(SameSquare(x1, y1, x2, y2),
+                                            # And(Not(SamePoint(x1, y1, x2, y2)),
+                                            #     Or(EqualPosition(x1, x2),
+                                            #         EqualPosition(y1, y2)))),
+                                            EqualLine(x1, y1, x2, y2)),
+                                         EqualLine(y1, x1, y2, x2)),
                                       EqualImageNumber(result, x1, y1, x2, y2))),
                        cond_vars=[s],
                        cond_fn=lambda s: s.value == wrong.value,
@@ -143,20 +144,24 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
                 Forall(
                     ltn.diag(result, l),
-                    Digit(result, l)).value,
+                    Digit(result, l)).value
+                ,
 
                 Forall(
                     ltn.diag(prediction, sl),
                     isCorrect(prediction, sl)).value
             )
 
+            train_acc += (prediction.value.max(1)[1] == s.value[0]).float().sum()
+
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
+
             loss.backward()
             optimizer.step()
-        print("Epoch %d: Sat Level %.5f " % (epoch, 1 - loss.item()))
+        print("Epoch %d: Sat Level %.5f Puzzle Accuracy: %.1f" % (epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset))))
 
-        print("Training finished at Epoch %d with Sat Level %.5f" % (epoch, 1 - loss.item()))
+    print("Training finished at Epoch %d with Sat Level %.5f and Puzzle Accuracy: %.1f" % (epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset))))
 
 
 if __name__ == '__main__':
