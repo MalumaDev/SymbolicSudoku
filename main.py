@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 from tqdm import trange, tqdm
 from make_dataloader import get_loaders
+import torchmetrics
 
 
 class SudokuNet(nn.Module):
@@ -92,8 +93,12 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
+    auc = torchmetrics.AUROC(task="multiclass", num_classes=2)
+
     for epoch in trange(epochs):
         train_acc = 0
+        pred_list = None
+        label_list = None
         for (batch_idx, batch) in enumerate(tqdm(trainloader, leave=False)):
             x, labels, sudoku_label = batch
             x.to(device)
@@ -153,15 +158,23 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             )
 
             train_acc += (prediction.value.max(1)[1] == s.value[0]).float().sum()
+            if pred_list is None:
+                pred_list = prediction.value.detach()
+                label_list = s.value.squeeze().detach()
+            else:
+                pred_list = torch.cat([pred_list, prediction.value.detach()], dim=0)
+                label_list = torch.cat([label_list, s.value.squeeze().detach()], dim=0)
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
 
             loss.backward()
             optimizer.step()
-        print("Epoch %d: Sat Level %.5f Puzzle Accuracy: %.1f" % (epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset))))
+        print("Epoch %d: Sat Level %.5f Puzzle Accuracy: %.1f Puzzle AUC: %.5f" % (
+        epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset)), auc(pred_list, label_list).item()))
 
-    print("Training finished at Epoch %d with Sat Level %.5f and Puzzle Accuracy: %.1f" % (epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset))))
+    print("Training finished at Epoch %d with Sat Level %.5f and Puzzle Accuracy: %.1f Puzzle AUC: %.5f" % (
+    epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset)), auc(pred_list, label_list).item()))
 
 
 if __name__ == '__main__':
