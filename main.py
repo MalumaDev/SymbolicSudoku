@@ -143,8 +143,7 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
                 Forall(
                     ltn.diag(result, l),
-                    Digit(result, l)).value
-                    ,
+                    Digit(result, l)).value,
 
                 Forall(
                     ltn.diag(prediction, sl),
