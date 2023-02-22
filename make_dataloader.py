@@ -1,33 +1,44 @@
-import os
+import PIL
 import numpy as np
+import os
 import torch
-from torch.utils.data import Dataset
 import torchvision
 import torchvision.transforms as transforms
+import webdataset as wds
 from PIL import Image
+from pathlib import Path
+from torch.utils.data import Dataset
+from tqdm import tqdm
 
-class sudoku_dataset(Dataset):
-    def __init__(self, path, tr_va_te="train", transform=None, type=4):
-        self.transform = transform
-        self.type = type
-        samples_cells = []
-        samples_pixels = []
-        samples_labels = []
-        for root, dirs, files in os.walk(os.path.join(path)):
+
+def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
+    transform = transform
+    type = type
+    path_out = Path(path) / f"offline_{tr_va_te}.tar"
+    samples_cells = []
+    samples_pixels = []
+    samples_labels = []
+    if not path_out.exists():
+        for root, dirs, files in tqdm(os.walk(os.path.join(path))):
             for f in files:
-                if tr_va_te+"_puzzle_pixels" in f:
+                if tr_va_te + "_puzzle_pixels" in f:
                     with open(os.path.join(root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             pixels = []
-                            for c in range(type*type):
+                            for c in range(type * type):
                                 step = 28 * 28
                                 number = l.split("\t")[c * step:c * step + step]
                                 pixels.append([float(n) for n in number])
-                            samples_pixels.append(pixels)
+                            image = np.zeros((28 * type, 28 * type))
+                            for i in range(type):
+                                for j in range(type):
+                                    image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
+                                        np.array(pixels[i * type + j]), (28, 28))
+                            samples_pixels.append(image)
                             if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
                                 break
 
-                if tr_va_te+"_cell_labels" in f:
+                if tr_va_te + "_cell_labels" in f:
                     with open(os.path.join(root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
@@ -36,8 +47,8 @@ class sudoku_dataset(Dataset):
                             if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
                                 break
 
-                if tr_va_te+"_puzzle_labels" in f:
-                    with open(os.path.join( root, f), "r") as liner:
+                if tr_va_te + "_puzzle_labels" in f:
+                    with open(os.path.join(root, f), "r") as liner:
                         for i, l in enumerate(liner.readlines()):
                             label = 1 if l.split("\t")[0] == "1" else 0
                             samples_labels.append(label)
@@ -45,28 +56,40 @@ class sudoku_dataset(Dataset):
                                 break
 
         samples = [(p, c, l) for p, c, l in zip(samples_pixels, samples_cells, samples_labels)]
+        with wds.TarWriter(str(path_out)) as dst:
+            key = 0
+            for pixels, cell, label in tqdm(samples):
+                sample = {
+                    "__key__": f"{key:08d}",
+                    "png": pixels,
+                    "cell.pyd": np.asarray(cell),
+                    "cls": label
+                }
+                dst.write(sample)
+                key += 1
 
-        self.samples = samples
+    return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(10000) \
+        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(transform,None, None)
 
-    def __len__(self):
-        return len(self.samples)
-    def __getitem__(self, index):
-        item = self.samples[index]
-        imgs = []
-        for n in item[0]:
-            img = Image.fromarray(np.reshape(np.array(n), (28,28)), mode="L")
 
-            if self.transform is not None:
-                img = self.transform(img)
+# def __len__(self):
+#     return len(self.samples)
+# def __getitem__(self, index):
+#     item = self.samples[index]
+#     imgs = []
+#     for n in item[0]:
+#         img = Image.fromarray(np.reshape(np.array(n), (28,28)), mode="L")
+#
+#         if self.transform is not None:
+#             img = self.transform(img)
+#
+#         imgs.append(img)
+#     imgs = torch.cat(imgs)
+#     labels = torch.tensor(np.array(item[1]))
+#     sudoku_label = item[2]
+#     return imgs, labels, sudoku_label
 
-            imgs.append(img)
-        imgs = torch.cat(imgs)
-        labels = torch.tensor(np.array(item[1]))
-        sudoku_label = item[2]
-        return imgs, labels, sudoku_label
-
-def  get_loaders(path, batch_size, type="mnist"):
-
+def get_loaders(path, batch_size, type="mnist"):
     transform = transforms.Compose(
         [transforms.ToTensor(),
          transforms.Normalize((0.1307,), (0.3081,))])
@@ -74,8 +97,9 @@ def  get_loaders(path, batch_size, type="mnist"):
     # TODO: Dataset
     match type:
         case 'mnist':
-            # TODO: MNIST
-
+            transform = transforms.Compose(
+                [transforms.ToTensor(),
+                 transforms.Normalize((0.1307,), (0.3081,))])
             trainset = torchvision.datasets.MNIST(root='./data', train=True,
                                                   download=True, transform=transform)
 
@@ -85,13 +109,18 @@ def  get_loaders(path, batch_size, type="mnist"):
                                                  download=True, transform=transform)
 
         case 'sudoku4':
-            train_set = sudoku_dataset(path=path, tr_va_te="train",
+            transform = transforms.Compose(
+                [
+                    transforms.Grayscale(num_output_channels=3),
+                    transforms.ToTensor(),
+                 transforms.Normalize((0.1307,), (0.3081,))])
+            train_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="train",
                                        transform=transform)
 
-            val_set = sudoku_dataset(path=path, tr_va_te="val",
+            val_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="val",
                                      transform=transform)
 
-            testset = sudoku_dataset(path=path, tr_va_te="test",
+            testset = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="test",
                                      transform=transform)
         case _:
             raise ValueError(f"Dataset {type} not supported.")
