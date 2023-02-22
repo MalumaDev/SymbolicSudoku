@@ -31,9 +31,9 @@ class SudokuNet(nn.Module):
         cells = self.fc3(x).softmax(dim=-2)
         cells = cells.reshape(original_batch_size, self.n_classes, self.n_classes, self.n_classes)
         puzzle = x.reshape(original_batch_size, -1)
-        puzzle = self.fc4(x).softmax(dim=-1)
+        puzzle = self.fc4(puzzle).softmax(dim=-1)
         # x = x.argmax(dim=-1)
-        return cells
+        return cells, puzzle
 
 
 @click.command()
@@ -78,7 +78,8 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             -1. * ((image * label) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
     isCorrect = ltn.Predicate(
-        func=lambda image, l: (image * l).sum(-1))
+        func=lambda image, label: torch.exp(
+            -1. * ((image * label) ** 2).reshape(image.shape[0], -1).sum(-1)))
 
     sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2))
 
@@ -100,11 +101,16 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
             onehot_labels = torch.nn.functional.one_hot(labels, num_classes=n_classes)
             onehot_labels = onehot_labels.reshape(batch_size, n_classes, n_classes, n_classes)
+            onehot_sudoku_label = torch.nn.functional.one_hot(sudoku_label, num_classes=2)
 
             l = ltn.Variable("l", onehot_labels)
             s = ltn.Variable("s", sudoku_label)
-            result = cnn(x)
+            sl = ltn.Variable("sl", onehot_sudoku_label)
+
+            result, prediction = cnn(x)
+
             result = ltn.Variable("result", result)
+            prediction = ltn.Variable("prediction", prediction)
             optimizer.zero_grad()
             loss = 1. - sat_agg(
                 Forall(s,
@@ -138,7 +144,12 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
                 Forall(
                     ltn.diag(result, l),
                     Digit(result, l)).value
-                    )
+                    ,
+
+                Forall(
+                    ltn.diag(prediction, sl),
+                    isCorrect(prediction, sl)).value
+            )
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
