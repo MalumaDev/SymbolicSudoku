@@ -68,10 +68,15 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
                 dst.write(sample)
                 key += 1
 
-    return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(10000) \
-        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(transform,None, None)
+    return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(10000 if tr_va_te != "train" else 0) \
+        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(lambda x : image_to_sub_square(transform(x)) ,None, None)
 
-
+def image_to_sub_square(image, type=4):
+    out = []
+    for i in range(type):
+        for j in range(type):
+            out.append(image[:, j * 28 : (j + 1) * 28, i * 28 : (i + 1) * 28])
+    return torch.cat(out, 0)
 # def __len__(self):
 #     return len(self.samples)
 # def __getitem__(self, index):
@@ -111,11 +116,12 @@ def get_loaders(path, batch_size, type="mnist"):
         case 'sudoku4':
             transform = transforms.Compose(
                 [
-                    transforms.Grayscale(num_output_channels=3),
+                    transforms.Grayscale(num_output_channels=1),
                     transforms.ToTensor(),
-                 transforms.Normalize((0.1307,), (0.3081,))])
+                 # transforms.Normalize((0.1307,), (0.3081,))
+                ])
             train_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="train",
-                                       transform=transform)
+                                       transform=transform,)
 
             val_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="val",
                                      transform=transform)
@@ -126,12 +132,12 @@ def get_loaders(path, batch_size, type="mnist"):
             raise ValueError(f"Dataset {type} not supported.")
 
     trainloader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                              shuffle=True, num_workers=2)
+                                              num_workers=8,drop_last=True)
 
     valloader = torch.utils.data.DataLoader(val_set, batch_size=batch_size,
-                                            shuffle=False, num_workers=2)
+                                            num_workers=8,drop_last=True)
 
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                             shuffle=False, num_workers=2)
+                                             num_workers=8,drop_last=True)
 
     return trainloader, valloader, testloader
