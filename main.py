@@ -1,3 +1,4 @@
+import itertools
 import math
 
 import click
@@ -83,24 +84,23 @@ def isValidSudoku(board, n_classes):
     return board2.sum(-2).all(-1).all(1) * board2.sum(-3).all(-1).all(1) * res
 
 
-def equal_image_number(image, x1, y1, x2, y2):
+def equal_image_number(image, all_points_comb):
     # image = image[batch_index]
     # x1 = x1[batch_index]
     # y1 = y1[batch_index]
     # x2 = x2[batch_index]
     # y2 = y2[batch_index]
 
-    x1 = x1.squeeze()
-    y1 = y1.squeeze()
-    x2 = x2.squeeze()
-    y2 = y2.squeeze()
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
     n_classes = image.shape[-1]
 
     a = image[torch.arange(image.size(0)), (x1 + y1 * n_classes)]
     b = image[torch.arange(image.size(0)), (x2 + y2 * n_classes)]
 
+    # a = torch.gather(image,)
+
     def func(x, alpha=1e10):
-        return (1- torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
+        return (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
 
     return (func(a) * func(b)).sum(-1)
 
@@ -112,32 +112,23 @@ def equal_image_number(image, x1, y1, x2, y2):
     #         torch.arange(image.size(0)), (x2 + y2 * n_classes)]) ** 2).sum(-1)).unsqueeze(-1)
 
 
-def equal_line(x1, y1, x2, y2):
-    # x1 = x1[batch_index]
-    # y1 = y1[batch_index]
-    # x2 = x2[batch_index]
-    # y2 = y2[batch_index]
+def equal_line(all_points_comb):
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
 
     return (x1 == x2) * torch.logical_not(y1 == y2)
 
 
-def equal_position(x1, y1, x2, y2):
-    # x1 = x1[batch_index]
-    # y1 = y1[batch_index]
-    # x2 = x2[batch_index]
-    # y2 = y2[batch_index]
+def equal_position(all_points_comb):
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
     return (x1 == x2) * (y1 == y2)
 
 
-def same_square(x1, y1, x2, y2, square_classes):
+def same_square(all_points_comb, square_classes):
     # x1 = x1[batch_index]
     # y1 = y1[batch_index]
     # x2 = x2[batch_index]
     # y2 = y2[batch_index]
-    x1 = x1.squeeze()
-    y1 = y1.squeeze()
-    x2 = x2.squeeze()
-    y2 = y2.squeeze()
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
 
     # print(f"x1: {x1.shape}, y1: {y1.shape}, x2: {x2.shape}, y2: {y2.shape}, square_classes: {square_classes.shape}")
     #
@@ -164,14 +155,57 @@ def isRightDigit(yp, y):
     return (yp * y).sum(-1).mean(-1)
 
 
-def possible_to_be_same_number(x1, y1, x2, y2, square_classes):
-    print(x1.shape, y1.shape, x2.shape, y2.shape, square_classes.shape)
+def possible_to_be_same_number_not_equal(all_points_comb, square_classes):
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
 
+    samex = x1 == x2
+    samey = y1 == y2
+    same_square = (x1 // square_classes == x2 // square_classes) * (y1 // square_classes == y2 // square_classes)
+
+    res = torch.logical_not(same_square) * torch.logical_not(samex + samey)
+    # print(res)
+    # for i in range(x1.shape[0]):
+    #     print()
+    #     res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
+    #     print(f"({x1[i].item(),y1[i].item()}) - ({x2[i].item(),y2[i].item()}) = {samex[i].item(),samey[i].item(),same_square[i].item()} - result: {res[i].item()}")
+
+    return res
+
+
+def possible_to_be_same_number(all_points_comb, square_classes):
+    # print(x1.shape, y1.shape, x2.shape, y2.shape, square_classes.shape)
+    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
+
+    samex = x1 == x2
+    samey = y1 == y2
+    same_square = (x1 // square_classes == x2 // square_classes) * (y1 // square_classes == y2 // square_classes)
+
+    res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
+    # print(res)
+    # for i in range(x1.shape[0]):
+    #     print()
+    #     res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
+    #     print(f"({x1[i].item(),y1[i].item()}) - ({x2[i].item(),y2[i].item()}) = {samex[i].item(),samey[i].item(),same_square[i].item()} - result: {res[i].item()}")
+
+    return res
+
+
+def test(s, result, l):
+    print(s.shape)
+    print(result.shape)
+    print(l.shape)
+
+    for i in range(s.shape[0]):
+        print("----")
+        print(f"{s[i].item()}")
+        print(f"{l[i].argmax(-1)}")
+
+    print(f"{result.item()}")
 
 
 @click.command()
 @click.option('--epochs', default=100, help='Number of epochs to train.')
-@click.option('--batch-size', default=65, help='Batch size.')
+@click.option('--batch-size', default=60, help='Batch size.')
 @click.option('--n_classes', default=4, help='Number of classes.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=20, help='How often to log results.')
@@ -191,7 +225,7 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
                              -1. * torch.sqrt(torch.sum(torch.square(x - x2) + torch.square(y - y2), dim=1))))
     # Equiv = ltn.Connective(
     #     ltn.fuzzy_ops.Equiv(ltn.fuzzy_ops.AndProd(), ltn.fuzzy_ops.ImpliesReichenbach()))
-    Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True), quantifier="f")
+    Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2, stable=True), quantifier="f")
     Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True), quantifier="e")
 
     # SamePoint = ltn.Predicate(func=lambda x1, y1, x2, y2: (x1 == x2 * y1 == y2))
@@ -204,20 +238,25 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
     EqualImageNumber = ltn.Predicate(func=equal_image_number)
     PossibleToBeSameNumber = ltn.Predicate(func=possible_to_be_same_number)
+    PossibleToBeSameNumberNotEqual = ltn.Predicate(func=possible_to_be_same_number_not_equal)
 
     # Mean = ltn.Predicate(func=mean)
 
     Digit = ltn.Predicate(func=isRightDigit)
+    Test = ltn.Predicate(func=test)
 
-    # sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMean(p=2,))
-    sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True))
+    sat_agg = ltn.fuzzy_ops.SatAgg()
+    # sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True))
 
     cnn = SudokuNet(n_classes=n_classes)
     cnn.to(device)
     cnn.train()
 
-    x1, x2, y1, y2 = (ltn.Variable(f"p{i}", torch.arange(n_classes)) for i in range(4))
-    # print(x1)
+    # x1, x2, y1, y2 = (ltn.Variable(f"p{i}", torch.arange(n_classes)) for i in range(4))
+    all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(
+        list(itertools.product(*[list(range(n_classes)) for _ in range(n_classes)]))))
+
+    # print(all_points_comb)
     correct = ltn.Constant(torch.tensor(1))
     wrong = ltn.Constant(torch.tensor(0))
 
@@ -271,24 +310,26 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
             loss = 1 - sat_agg(
                 Forall(ltn.diag(s, result),
-                       Forall([x1, y1, x2, y2],
-                              Implies(Or(Or(SameSquare(x1, y1, x2, y2, square_classes),
-                                            EqualLine(x1, y1, x2, y2)),
-                                         EqualLine(y1, x1, y2, x2)),
-                                      Not(EqualImageNumber(result, x1, y1, x2, y2)))),
-                       cond_vars=[s],
+                       # Test(s, result, l) and
+                       Forall([all_points_comb],
+                              Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
+                                      Not(EqualImageNumber(result, all_points_comb)))),
+                       cond_vars=s,
                        cond_fn=lambda v: v.value == correct.value,
-                       p=2
                        ),
-                Forall(ltn.diag(s, result), Exists([x1, y1, x2, y2],
-                                                   Implies(Or(Or(SameSquare(x1, y1, x2, y2, square_classes),
-                                                                 EqualLine(x1, y1, x2, y2)),
-                                                              EqualLine(y1, x1, y2, x2)),
-                                                           EqualImageNumber(result, x1, y1, x2, y2))),
-                       cond_vars=[s],
-                       cond_fn=lambda v: v.value == wrong.value,
-                       p=2
-                       ),
+                # Forall(ltn.diag(s, result),
+                #        Forall([all_points_comb],
+                #               Implies(PossibleToBeSameNumber(all_points_comb, square_classes),
+                #                       Or(Not(EqualImageNumber(result, all_points_comb)),
+                #                          EqualImageNumber(result, all_points_comb)))),
+                #        ),
+                # Forall(ltn.diag(s, result), Exists([all_points_comb],
+                #                                    Implies(Not(PossibleToBeSameNumberNotEqual(all_points_comb,
+                #                                                                               square_classes)),
+                #                                            EqualImageNumber(result, all_points_comb))),
+                #        cond_vars=s,
+                #        cond_fn=lambda v: v.value == wrong.value,
+                #        ),
 
                 # Forall(
                 #     ltn.diag(result, l),

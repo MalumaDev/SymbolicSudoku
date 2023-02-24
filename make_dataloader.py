@@ -68,7 +68,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
                 key += 1
 
     return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(
-        100000 if tr_va_te == "train" else 0) \
+        100000 if tr_va_te != "train" else 0) \
         .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(lambda x: image_to_sub_square(transform(x)),
                                                                         None, None)
 
