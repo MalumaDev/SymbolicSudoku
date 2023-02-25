@@ -15,24 +15,6 @@ from make_dataloader import get_loaders
 # torch.backends.cudnn.benchmark = True
 
 
-class STEFunction(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, input):
-        return (input + 1e-8 > 0).float()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return torch.tanh(grad_output)
-
-
-class StraightThroughEstimator(nn.Module):
-    def __init__(self):
-        super(StraightThroughEstimator, self).__init__()
-
-    def forward(self, x):
-        x = STEFunction.apply(x)
-        return x
-
 
 class SudokuNet(nn.Module):
     def __init__(self, n_classes):
@@ -190,6 +172,50 @@ def possible_to_be_same_number(all_points_comb, square_classes):
     return res
 
 
+def isCorrect(s, x):
+    # print(s.shape)
+    # print(x.shape)
+    n = int(math.sqrt(x.shape[1] // x.shape[-1]))
+    alpha = 1e10
+    x = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
+    # x = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
+
+    row = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1]).sum(-2).prod(-1).prod(-1)
+    col = torch.index_select(x,1,torch.tensor([0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15],device=x.device)).reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1]).sum(-2).prod(-1).prod(-1)
+    # col = x.swapaxes(1, 2).sum(-2).prod(-1).prod(-1)
+    res = row * col
+    for i in range(n):
+        for j in range(n):
+            res *= x[:, i * n: (i + 1) * n, j * n: (j + 1) * n].reshape(x.shape[0], -1, x.shape[-1]).sum(-2).prod(-1)
+
+    return res.unsqueeze(-1) * s + (1 - s) * (1 - res.unsqueeze(-1))
+
+
+def row(x):
+    alpha = 1e10
+    xb = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
+    xb = xb.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
+    return xb.sum(-2).prod(-1).prod(-1)
+
+def column(x):
+    alpha = 1e10
+    xb = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
+    xb = xb.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
+    return xb.swapaxes(1, 2).sum(-2).prod(-1).prod(-1)
+
+
+def square(x):
+    alpha = 1e10
+    x = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
+    x = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
+    n = int(math.sqrt(x.shape[1]))
+    res = torch.ones(x.shape[0], device=x.device)
+    for i in range(n):
+        for j in range(n):
+            res = res * x[:, i * n: (i + 1) * n, j * n: (j + 1) * n].reshape(x.shape[0], -1, x.shape[-1]).sum(-2).prod(-1)
+    return res
+
+
 def test(s, result, l):
     print(s.shape)
     print(result.shape)
@@ -205,7 +231,7 @@ def test(s, result, l):
 
 @click.command()
 @click.option('--epochs', default=100, help='Number of epochs to train.')
-@click.option('--batch-size', default=60, help='Batch size.')
+@click.option('--batch-size', default=65, help='Batch size.')
 @click.option('--n_classes', default=4, help='Number of classes.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=20, help='How often to log results.')
@@ -223,8 +249,8 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     Dist = ltn.Predicate(func=
                          lambda x, y, x2, y2: torch.exp(
                              -1. * torch.sqrt(torch.sum(torch.square(x - x2) + torch.square(y - y2), dim=1))))
-    # Equiv = ltn.Connective(
-    #     ltn.fuzzy_ops.Equiv(ltn.fuzzy_ops.AndProd(), ltn.fuzzy_ops.ImpliesReichenbach()))
+    Equiv = ltn.Connective(
+       ltn.fuzzy_ops.Equiv(ltn.fuzzy_ops.AndProd(), ltn.fuzzy_ops.ImpliesReichenbach()))
     Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2, stable=True), quantifier="f")
     Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True), quantifier="e")
 
@@ -244,6 +270,11 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
     Digit = ltn.Predicate(func=isRightDigit)
     Test = ltn.Predicate(func=test)
+    Correct = ltn.Predicate(func=isCorrect)
+    Pass = ltn.Predicate(func=lambda s: s)
+    Row = ltn.Predicate(func=row)
+    Column = ltn.Predicate(func=column)
+    Square = ltn.Predicate(func=square)
 
     sat_agg = ltn.fuzzy_ops.SatAgg()
     # sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True))
@@ -308,9 +339,42 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
             result = ltn.Variable("result", result)
             # prediction = ltn.Variable("prediction", prediction)
 
+            # loss = 1 - sat_agg(
+            #     Forall(ltn.diag(s, result),
+            #            # Test(s, result, l) and
+            #            Forall([all_points_comb],
+            #                   Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
+            #                           Not(EqualImageNumber(result, all_points_comb)))),
+            #            cond_vars=s,
+            #            cond_fn=lambda v: v.value == correct.value,
+            #            ),
+            #     Forall(ltn.diag(s, result),
+            #            Forall([all_points_comb],
+            #                   Implies(PossibleToBeSameNumber(all_points_comb, square_classes),
+            #                           Or(Not(EqualImageNumber(result, all_points_comb)),
+            #                              EqualImageNumber(result, all_points_comb)))),
+            #            ),
+            #     Forall(ltn.diag(s, result), Exists([all_points_comb],
+            #                                        Implies(Not(PossibleToBeSameNumberNotEqual(all_points_comb,
+            #                                                                                   square_classes)),
+            #                                                EqualImageNumber(result, all_points_comb))),
+            #            cond_vars=s,
+            #            cond_fn=lambda v: v.value == wrong.value,
+            #            ),
+            #
+            #     # Forall(
+            #     #     ltn.diag(result, l),
+            #     #     Digit(result, l),
+            #     # )
+            #
+            #     #
+            #     # Forall(
+            #     #     ltn.diag(prediction, sl),
+            #     #     isCorrect(prediction, sl)).value
+            # )
             loss = 1 - sat_agg(
                 Forall(ltn.diag(s, result),
-                       # Test(s, result, l) and
+                       Test(s, result, l) and
                        Forall([all_points_comb],
                               Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
                                       Not(EqualImageNumber(result, all_points_comb)))),
@@ -318,18 +382,40 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
                        cond_fn=lambda v: v.value == correct.value,
                        ),
                 # Forall(ltn.diag(s, result),
-                #        Forall([all_points_comb],
-                #               Implies(PossibleToBeSameNumber(all_points_comb, square_classes),
-                #                       Or(Not(EqualImageNumber(result, all_points_comb)),
-                #                          EqualImageNumber(result, all_points_comb)))),
+                #        Correct(s,result)
+                       # cond_vars=s,
+                       # cond_fn=lambda v: v.value == correct.value,
+                       # ),
+                Forall(ltn.diag(s, result),
+                       Implies(Pass(s), Row(result)),
+                       # cond_vars=s,
+                       # cond_fn=lambda v: v.value == correct.value,
+                       ),
+                Forall(ltn.diag(s, result),
+                       Implies(Pass(s), Column(result)),
+                       # cond_vars=s,
+                       # cond_fn=lambda v: v.value == correct.value,
+                       ),
+                # Forall(ltn.diag(s, result),
+                #        Implies(Pass(s), Square(result)),
+                #        # cond_vars=s,
+                #        # cond_fn=lambda v: v.value == correct.value,
                 #        ),
-                # Forall(ltn.diag(s, result), Exists([all_points_comb],
-                #                                    Implies(Not(PossibleToBeSameNumberNotEqual(all_points_comb,
-                #                                                                               square_classes)),
-                #                                            EqualImageNumber(result, all_points_comb))),
-                #        cond_vars=s,
-                #        cond_fn=lambda v: v.value == wrong.value,
-                #        ),
+                # Exists(ltn.diag(s, result),
+                #           Implies(Not(Pass(s)), Not(Row(result))),
+                #           # cond_vars=s,
+                #           # cond_fn=lambda v: v.value == correct.value,
+                #           ),
+                # Exists(ltn.diag(s, result),
+                #           Implies(Not(Pass(s)), Not(Column(result))),
+                #           # cond_vars=s,
+                #           # cond_fn=lambda v: v.value == correct.value,
+                #           ),
+                # Exists(ltn.diag(s, result),
+                #             Implies(Not(Pass(s)), Not(Square(result))),
+                #             # cond_vars=s,
+                #             # cond_fn=lambda v: v.value == correct.value,
+                #             ),
 
                 # Forall(
                 #     ltn.diag(result, l),
