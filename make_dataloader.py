@@ -198,7 +198,9 @@ def get_loaders(batch_size, type="mnist4"):
 
         case _:
             raise ValueError(f"Dataset {type} not supported.")
-
+    
+    path = os.path.join(path, 'ViSudo-PC/ViSudo-PC_dimension::4_datasets::mnist_strategy::simple/dimension::' + str(type[-1]) + '/datasets::' + str(type[:-1]) + '/strategy::simple/strategy::simple/numTrain::00050')
+    
     train_set = sudoku_dataset(path=path, tr_va_te="train",
                                transform=transform, type=n_classes)
 
