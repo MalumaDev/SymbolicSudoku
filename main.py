@@ -224,7 +224,7 @@ def main(epochs, batch_size, lr, log_interval, dataset):
 
         with torch.no_grad():
             cnn.eval()
-            for (batch_idx, batch) in enumerate(trainloader):
+            for (batch_idx, batch) in enumerate(valloader):
                 x, labels, sudoku_label = batch
 
                 x = x.to(device)
