@@ -1,8 +1,10 @@
 import itertools
 import math
+from pathlib import Path
 
 import click
 import ltn
+import pandas as pd
 import torch
 import torchmetrics
 from torch import nn
@@ -39,19 +41,6 @@ class SudokuNet(nn.Module):
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
         return F.softmax(x, dim=-1).reshape(original_batch_size, -1, self.n_classes)
-        # return x.reshape(original_batch_size, -1, self.n_classes)
-        # x = self.pool(F.leaky_relu(self.conv1(x)))
-        # x = self.pool(F.leaky_relu(self.conv2(x)))
-        # x = torch.flatten(x, 1)
-        # x = F.leaky_relu(self.fc1(x))
-        # x = F.leaky_relu(self.fc2(x))
-        # x = self.fc3(x).softmax(dim=-1)
-        # # out = torch.sum(x * l, dim=1)
-        # return x.reshape(original_batch_size, -1, self.n_classes)
-
-
-def get_sub_square(x, i, j, type):
-    return x[:, i * type: (i + 1) * type, j * type: (j + 1) * type, :]
 
 
 def isValidSudoku(board, n_classes):
@@ -61,80 +50,21 @@ def isValidSudoku(board, n_classes):
     for i in range(sqrt_classes):
         res *= board2[:, i * sqrt_classes: (i + 1) * sqrt_classes, i * sqrt_classes: (i + 1) * sqrt_classes, :].reshape(
             -1, n_classes, n_classes).sum(-2).all(1)
-    # print(res.shape)
     return board2.sum(-2).all(-1).all(1) * board2.sum(-3).all(-1).all(1) * res
 
 
 def equal_image_number(image, all_points_comb):
-    # image = image[batch_index]
-    # x1 = x1[batch_index]
-    # y1 = y1[batch_index]
-    # x2 = x2[batch_index]
-    # y2 = y2[batch_index]
-
     x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
     n_classes = image.shape[-1]
 
     a = image[torch.arange(image.size(0)), (x1 + y1 * n_classes)]
     b = image[torch.arange(image.size(0)), (x2 + y2 * n_classes)]
 
-    # a = torch.gather(image,)
-
-    # def func(x, alpha=1e10):
-    #     return (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
-    #
-    # return (func(a) * func(b)).sum(-1)
     res = torch.pairwise_distance(a, b)
     return torch.exp(-torch.relu(res - 0.1))
 
-    # return (torch.heaviside(a - a.max(-1, keepdims=True).values, torch.tensor(1.,requires_grad=True)) * torch.heaviside(
-    #     b - b.max(-1, keepdims=True).values, torch.tensor(1.,requires_grad=True))).sum(-1)
-
-    # return torch.exp(
-    #     -1. * ((image[torch.arange(image.size(0)), (x1 + y1 * n_classes)] - image[
-    #         torch.arange(image.size(0)), (x2 + y2 * n_classes)]) ** 2).sum(-1)).unsqueeze(-1)
-
-
-def equal_line(all_points_comb):
-    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
-
-    return (x1 == x2) * torch.logical_not(y1 == y2)
-
-
-def equal_position(all_points_comb):
-    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
-    return (x1 == x2) * (y1 == y2)
-
-
-def same_square(all_points_comb, square_classes):
-    # x1 = x1[batch_index]
-    # y1 = y1[batch_index]
-    # x2 = x2[batch_index]
-    # y2 = y2[batch_index]
-    x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
-
-    # print(f"x1: {x1.shape}, y1: {y1.shape}, x2: {x2.shape}, y2: {y2.shape}, square_classes: {square_classes.shape}")
-    #
-    # print(f"x1 // square_classes: {(x1 // square_classes).shape}")
-    # print(f"(x1 == x2): {(x1 == x2).shape}")
-    # print((torch.logical_not((x1 == x2) * (y1 == y2)) * (x1 // square_classes == x2 // square_classes) * (
-    #         y1 // square_classes == y2 // square_classes)).shape)
-
-    return (torch.logical_not((x1 == x2) * (y1 == y2)) * (x1 // square_classes == x2 // square_classes) * (
-            y1 // square_classes == y2 // square_classes)).unsqueeze(-1)
-
 
 def isRightDigit(yp, y):
-    # print(f"yp: {yp.shape}, y: {y.shape}")
-    batch_size = yp.shape[0]
-    # yp = yp.reshape(-1, yp.shape[-1])
-    # y = y.reshape(-1, y.shape[-1])
-    # print(f"yp: {yp.shape}, y: {y.shape}")
-
-    # # distance between two vectors
-    # dist = torch.exp(
-    #     -1. * torch.sqrt(torch.sum(torch.square(yp - y), dim=-1)))
-    # return dist.reshape(batch_size, -1).mean(-1)
     return (yp * y).sum(-1).mean(-1)
 
 
@@ -164,74 +94,8 @@ def possible_to_be_same_number(all_points_comb, square_classes):
     same_square = (x1 // square_classes == x2 // square_classes) * (y1 // square_classes == y2 // square_classes)
 
     res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
-    # print(res)
-    # for i in range(x1.shape[0]):
-    #     print()
-    #     res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
-    #     print(f"({x1[i].item(),y1[i].item()}) - ({x2[i].item(),y2[i].item()}) = {samex[i].item(),samey[i].item(),same_square[i].item()} - result: {res[i].item()}")
 
     return res
-
-
-def isCorrect(s, x):
-    # print(s.shape)
-    # print(x.shape)
-    n = int(math.sqrt(x.shape[1] // x.shape[-1]))
-    alpha = 1e10
-    x = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
-    # x = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
-
-    row = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1]).sum(-2).prod(-1).prod(-1)
-    col = torch.index_select(x, 1, torch.tensor([0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15],
-                                                device=x.device)).reshape(x.shape[0], x.shape[-1], x.shape[-1],
-                                                                          x.shape[-1]).sum(-2).prod(-1).prod(-1)
-    # col = x.swapaxes(1, 2).sum(-2).prod(-1).prod(-1)
-    res = row * col
-    for i in range(n):
-        for j in range(n):
-            res *= x[:, i * n: (i + 1) * n, j * n: (j + 1) * n].reshape(x.shape[0], -1, x.shape[-1]).sum(-2).prod(-1)
-
-    return res.unsqueeze(-1) * s + (1 - s) * (1 - res.unsqueeze(-1))
-
-
-def row(x):
-    alpha = 1e10
-    xb = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
-    xb = xb.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
-    return xb.sum(-2).prod(-1).prod(-1)
-
-
-def column(x):
-    alpha = 1e10
-    xb = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
-    xb = xb.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
-    return xb.swapaxes(1, 2).sum(-2).prod(-1).prod(-1)
-
-
-def square(x):
-    alpha = 1e10
-    x = (1 - torch.sigmoid(-alpha * (x - x.max(-1, keepdims=True).values))) * 2
-    x = x.reshape(x.shape[0], x.shape[-1], x.shape[-1], x.shape[-1])
-    n = int(math.sqrt(x.shape[1]))
-    res = torch.ones(x.shape[0], device=x.device)
-    for i in range(n):
-        for j in range(n):
-            res = res * x[:, i * n: (i + 1) * n, j * n: (j + 1) * n].reshape(x.shape[0], -1, x.shape[-1]).sum(-2).prod(
-                -1)
-    return res
-
-
-def test(s, result, l):
-    print(s.shape)
-    print(result.shape)
-    print(l.shape)
-
-    for i in range(s.shape[0]):
-        print("----")
-        print(f"{s[i].item()}")
-        print(f"{l[i].argmax(-1)}")
-
-    print(f"{result.item()}")
 
 
 def calculate_points_pred(pred, all_points_comb, max_dist=0.1):
@@ -252,66 +116,50 @@ def calculate_points_labels(labels, all_points_comb, n_classes=4):
 
 
 @click.command()
-@click.option('--epochs', default=100, help='Number of epochs to train.')
+@click.option('--epochs', default=20, help='Number of epochs to train.')
 @click.option('--batch-size', default=65, help='Batch size.')
-@click.option('--n_classes', default=4, help='Number of classes.')
 @click.option('--lr', default=0.001, help='Learning rate.')
-@click.option('--log_interval', default=20, help='How often to log results.')
-@click.option('--dataset', default='sudoku4', help='Dataset to use.')
-@click.option('--path', default='data/MNISTx4Sudoku', help='Path for dataset')
-def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
+@click.option('--log_interval', default=100, help='How often to log results.')
+@click.option('--dataset', default='mnist9', help='Dataset to use.')
+def main(epochs, batch_size, lr, log_interval, dataset):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    trainloader, valloader, testloader = get_loaders(path, batch_size, type=dataset)
+    res_path = Path(f"results/{dataset}.csv")
+    res_path.parent.mkdir(parents=True, exist_ok=True)
+
+    trainloader, valloader, testloader, n_classes = get_loaders(batch_size, type=dataset)
     max_dist = 0.1
 
     Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
-    And = ltn.Connective(ltn.fuzzy_ops.AndProd())
-    Or = ltn.Connective(ltn.fuzzy_ops.OrProbSum())
     Implies = ltn.Connective(ltn.fuzzy_ops.ImpliesReichenbach())
-    Dist = ltn.Predicate(func=
-                         lambda x, y, x2, y2: torch.exp(
-                             -1. * torch.sqrt(torch.sum(torch.square(x - x2) + torch.square(y - y2), dim=1))))
-    Equiv = ltn.Connective(
-        ltn.fuzzy_ops.Equiv(ltn.fuzzy_ops.AndProd(), ltn.fuzzy_ops.ImpliesReichenbach()))
+
     Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2), quantifier="f")
     Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2), quantifier="e")
 
-    # SamePoint = ltn.Predicate(func=lambda x1, y1, x2, y2: (x1 == x2 * y1 == y2))
-
     square_classes = ltn.Constant(torch.tensor(int(math.sqrt(n_classes))))
-    SameSquare = ltn.Predicate(func=same_square)
-    EqualPosition = ltn.Predicate(func=equal_position)
-
-    EqualLine = ltn.Predicate(func=equal_line)
 
     EqualImageNumber = ltn.Predicate(func=equal_image_number)
     PossibleToBeSameNumber = ltn.Predicate(func=possible_to_be_same_number)
     PossibleToBeSameNumberNotEqual = ltn.Predicate(func=possible_to_be_same_number_not_equal)
 
-    # Mean = ltn.Predicate(func=mean)
-
-    Digit = ltn.Predicate(func=isRightDigit)
-    Test = ltn.Predicate(func=test)
-    Correct = ltn.Predicate(func=isCorrect)
-    Pass = ltn.Predicate(func=lambda s: s)
-    Row = ltn.Predicate(func=row)
-    Column = ltn.Predicate(func=column)
-    Square = ltn.Predicate(func=square)
-
     sat_agg = ltn.fuzzy_ops.SatAgg()
-    # sat_agg = ltn.fuzzy_ops.SatAgg(agg_op=ltn.fuzzy_ops.AggregPMeanError(p=2, stable=True))
 
     cnn = SudokuNet(n_classes=n_classes)
     cnn.to(device)
     cnn.train()
 
-    # x1, x2, y1, y2 = (ltn.Variable(f"p{i}", torch.arange(n_classes)) for i in range(4))
-    all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(
-        list(itertools.product(*[list(range(n_classes)) for _ in range(n_classes)]))))
+    # all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(
+    #     list(itertools.product(*[list(range(n_classes)) for _ in range(n_classes)]))))
 
-    # print(all_points_comb)
-    correct = ltn.Constant(torch.tensor(1))
+    all_points_comb = []
+    for i in trange(n_classes):
+        for j in range(n_classes):
+            for k in range(n_classes):
+                for l in range(n_classes):
+                    all_points_comb.append([i, j, k, l])
+
+    all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(all_points_comb, device=device))
+    correct = ltn.Constant(torch.tensor(1, device=device))
     wrong = ltn.Constant(torch.tensor(0))
 
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
@@ -319,144 +167,42 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
     auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
     points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
     accuracy = torchmetrics.Accuracy(num_classes=2)
+    # Test metrics
+    test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
+    test_accuracy = torchmetrics.Accuracy(num_classes=2)
+
+    df = pd.DataFrame(columns=["epoch", "train_loss", "train_auc", "train_points_auc", "train_accuracy",
+                               "test_auc", "test_points_auc", "test_accuracy"])
+
 
     for epoch in trange(epochs):
-        train_acc = 0
-        pred_list = None
-        label_list = None
         for (batch_idx, batch) in enumerate(trainloader):
-            # if batch_idx == 100:
-            #     break
 
             x, labels, sudoku_label = batch
 
-            # import matplotlib.pyplot as plt
-            # image = torch.zeros(1,28,28*16)
-            # for i in range(16):
-            #     image[0, 0:28, i*28:(i+1)*28] = x[0][i]
-            # plt.imshow(torchvision.transforms.ToPILImage()(image))
-            # newline = ""
-            # plt.title(" ".join([f"{newline if i %4 == 0 and i != 0 else ''}{n}" for i,n in enumerate(labels[0].tolist())]))
-            # plt.tight_layout()
-            # plt.show()
             x = x.to(device)
             labels = labels.to(device)
             sudoku_label = sudoku_label.to(device)
-            # print(x.shape)
-            # print(labels.shape)
-            # print(sudoku_label)
-            onehot_labels = torch.nn.functional.one_hot(labels, num_classes=n_classes)
-            # onehot_labels = onehot_labels.reshape(x.shape[0], n_classes, n_classes, n_classes)
-            onehot_sudoku_label = torch.nn.functional.one_hot(sudoku_label, num_classes=2)
 
-            # print("onehot_labels:", onehot_labels.shape)
-
-            l = ltn.Variable("l", onehot_labels)
             s = ltn.Variable("s", sudoku_label)
-            batch_index = ltn.Variable("batch_index", torch.arange(x.shape[0]))
-            sl = ltn.Variable("sl", onehot_sudoku_label)
 
             optimizer.zero_grad()
             result = cnn(x)
-            # print("result:", result.shape)
-            # print(result.sum(-1))
             result = ltn.Variable("result", result)
-            # prediction = ltn.Variable("prediction", prediction)
 
-            # loss = 1 - sat_agg(
-            #     Forall(ltn.diag(s, result),
-            #            # Test(s, result, l) and
-            #            Forall([all_points_comb],
-            #                   Implies(And(Pass(s), Not(PossibleToBeSameNumber(all_points_comb, square_classes))),
-            #                           Not(EqualImageNumber(result, all_points_comb)))),
-            #            cond_vars=s,
-            #            cond_fn=lambda v: v.value == correct.value,
-            #            ),
-            #     Forall(ltn.diag(s, result),
-            #            Forall([all_points_comb],
-            #                   Implies(PossibleToBeSameNumber(all_points_comb, square_classes),
-            #                           Or(Not(EqualImageNumber(result, all_points_comb)),
-            #                              EqualImageNumber(result, all_points_comb))),
-            #                   ),
-            #            ),
-            #     Forall(ltn.diag(s, result), Exists([all_points_comb],
-            #                                        Implies(Not(PossibleToBeSameNumberNotEqual(all_points_comb,
-            #                                                                                   square_classes)),
-            #                                                EqualImageNumber(result, all_points_comb))),
-            #            cond_vars=s,
-            #            cond_fn=lambda v: v.value == wrong.value,
-            #            ),
-
-                #     # Forall(
-                #     #     ltn.diag(result, l),
-                #     #     Digit(result, l),
-                #     # )
-                #
-                #     #
-                #     # Forall(
-                #     #     ltn.diag(prediction, sl),
-                #     #     isCorrect(prediction, sl)).value
-            # )
             loss = 1 - sat_agg(
                 Forall(ltn.diag(s, result),
-                       # Test(s, result, l) and
                        Forall([all_points_comb],
                               Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
                                       Not(EqualImageNumber(result, all_points_comb)))),
                        cond_vars=s,
                        cond_fn=lambda v: v.value == correct.value,
                        ),
-                Forall(ltn.diag(s, result),
-                       Correct(s,result),
-                ),
             )
-            # Forall(ltn.diag(s, result),
-            #        Implies(Pass(s), Row(result)),
-            # cond_vars=s,
-            # cond_fn=lambda v: v.value == correct.value,
-            # ),
-            # Forall(ltn.diag(s, result),
-            #        Implies(Pass(s), Column(result)),
-            # cond_vars=s,
-            # cond_fn=lambda v: v.value == correct.value,
-            # ),
-            # Forall(ltn.diag(s, result),
-            #        Implies(Pass(s), Square(result)),
-            #        # cond_vars=s,
-            #        # cond_fn=lambda v: v.value == correct.value,
-            #        ),
-            # Exists(ltn.diag(s, result),
-            #           Implies(Not(Pass(s)), Not(Row(result))),
-            #           # cond_vars=s,
-            #           # cond_fn=lambda v: v.value == correct.value,
-            #           ),
-            # Exists(ltn.diag(s, result),
-            #           Implies(Not(Pass(s)), Not(Column(result))),
-            #           # cond_vars=s,
-            #           # cond_fn=lambda v: v.value == correct.value,
-            #           ),
-            # Exists(ltn.diag(s, result),
-            #             Implies(Not(Pass(s)), Not(Square(result))),
-            #             # cond_vars=s,
-            #             # cond_fn=lambda v: v.value == correct.value,
-            #             ),
-            #
-            # Forall(
-            #     ltn.diag(result, l),
-            #     Digit(result, l),
-            # )
-
-            #
-            # Forall(
-            #     ltn.diag(prediction, sl),
-            #     isCorrect(prediction, sl)).value
-            # )
-
-            # print(f"{isValidSudoku(result.value, n_classes).shape} {s.value.shape}")
-            # print(isValidSudoku(result.value, n_classes).shape)
             accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
 
-            auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
+            # auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
             points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
                        calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
@@ -466,15 +212,62 @@ def main(epochs, batch_size, n_classes, lr, log_interval, dataset, path):
 
             loss.backward()
             optimizer.step()
+
+        loss_log = 1 - loss.item()
+        accuracy_log = accuracy.compute()
+        # auc_log = auc.compute()
+        points_auc_log = points_auc.compute()
         print(
-            f"Epoch {epoch}: Sat Level {1 - loss.item():.5f} Puzzle Accuracy: {accuracy.compute():.3f}, Task AUC: {points_auc.compute():.5f}, Task AUC2: {auc.compute():.5f}")
+            f"Epoch {epoch} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f},"
+            f" Task AUC: {points_auc_log:.5f}")
+
+        with torch.no_grad():
+            cnn.eval()
+            for (batch_idx, batch) in enumerate(trainloader):
+                x, labels, sudoku_label = batch
+
+                x = x.to(device)
+                labels = labels.to(device)
+                sudoku_label = sudoku_label.to(device)
+
+                s = ltn.Variable("s", sudoku_label)
+
+                result = cnn(x)
+                result = ltn.Variable("result", result)
+
+                test_accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+
+                # test_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
+
+                test_points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
+                                calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
+
+
+            # test_auc_log = test_auc.compute()
+            test_points_auc_log = test_points_auc.compute()
+            test_accuracy_log = test_accuracy.compute()
+
+            print(
+                f"Epoch {epoch} Validation: Puzzle Accuracy: {test_accuracy_log:.3f},"
+                f" Task AUC: {test_points_auc_log:.5f}")
+
+            df = df.append({"epoch": epoch,
+                            "train_loss": loss_log,
+                            "train_points_auc": points_auc_log,
+                            "train_accuracy": accuracy_log,
+                            "test_points_auc": test_points_auc_log,
+                            "test_accuracy": test_accuracy_log}, ignore_index=True)
+            df.to_csv(res_path, index=False)
+
+        test_accuracy.reset()
+        test_points_auc.reset()
+        # test_auc.reset()
+        cnn.train()
+
         accuracy.reset()
         points_auc.reset()
-        auc.reset()
+        # auc.reset()
 
-    # accuracy.reset()
-    # print("Training finished at Epoch %d with Sat Level %.5f and Puzzle Accuracy: %.1f Puzzle AUC: %.5f" % (
-    #     epoch, 1 - loss.item(), 100 * (train_acc / len(trainloader.dataset)), auc(pred_list, label_list).item()))
 
 
 if __name__ == '__main__':

@@ -1,4 +1,6 @@
 import os
+import sys
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -6,8 +8,16 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import webdataset as wds
+import wget
 from torch.utils.data import Dataset
 from tqdm import tqdm
+
+
+def bar_progress(current, total, width=80):
+    progress_message = "Downloading: %d%% [%d / %d] bytes" % (current / total * 100, current, total)
+    # Don't use print() as it will print in new line every time.
+    sys.stdout.write("\r" + progress_message)
+    sys.stdout.flush()
 
 
 def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
@@ -18,7 +28,8 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
     samples_pixels = []
     samples_labels = []
     if not path_out.exists():
-        for root, dirs, files in tqdm(os.walk(os.path.join(path))):
+        files = os.walk(os.path.join(path))
+        for root, dirs, files in tqdm(files, desc="Generating dataset"):
             for f in files:
                 if tr_va_te + "_puzzle_pixels" in f:
                     with open(os.path.join(root, f), "r") as liner:
@@ -69,7 +80,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
 
     return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(
         100000 if tr_va_te == "train" else 0) \
-        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(lambda x: image_to_sub_square(transform(x)),
+        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(lambda x: image_to_sub_square(transform(x),type=type),
                                                                         None, None)
 
 
@@ -98,42 +109,104 @@ def image_to_sub_square(image, type=4):
 #     sudoku_label = item[2]
 #     return imgs, labels, sudoku_label
 
-def get_loaders(path, batch_size, type="mnist"):
+dataset_link = {
+    "mnist4": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::4_datasets::mnist_strategy::simple.zip",
+    "mnist9": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::9_datasets::mnist_strategy::simple.zip",
+    "emnist4": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::4_datasets::emnist_strategy::simple.zip",
+    "emnist9": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::9_datasets::emnist_strategy::simple.zip",
+    "fmnist4": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::4_datasets::fmnist_strategy::simple.zip",
+    "fmnist9": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::9_datasets::fmnist_strategy::simple.zip",
+    "kmnist4": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::4_datasets::kmnist_strategy::simple.zip",
+    "kmnist9": "https://linqs-data.soe.ucsc.edu/public/datasets/ViSudo-PC/v01/ViSudo-PC_dimension::9_datasets::kmnist_strategy::simple.zip",
+}
+
+
+def download_dataset(dataset, path):
+    if not path.exists():
+        print("Downloading data")
+        path.mkdir(parents=True, exist_ok=True)
+        wget.download(
+            dataset_link[dataset],
+            str(path / "data.zip"), bar=bar_progress)
+
+        print("Extracting data")
+        with zipfile.ZipFile(path / "data.zip", 'r') as zip_ref:
+            zip_ref.extractall(path)
+            os.remove(path / "data.zip")
+
+
+def get_loaders(batch_size, type="mnist4"):
     transform = transforms.Compose(
-        [transforms.ToTensor(),
-         transforms.Normalize((0.1307,), (0.3081,))])
+        [
+            transforms.Grayscale(num_output_channels=1),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+        ])
 
-    # TODO: Dataset
     match type:
-        case 'mnist':
-            transform = transforms.Compose(
-                [transforms.ToTensor(),
-                 transforms.Normalize((0.1307,), (0.3081,))])
-            trainset = torchvision.datasets.MNIST(root='./data', train=True,
-                                                  download=True, transform=transform)
+        case 'mnist4':
+            path = Path("./data/MNISTx4Sudoku")
+            download_dataset(type, path)
 
-            train_set, val_set = torch.utils.data.random_split(trainset, [50000, 10000])
-
-            testset = torchvision.datasets.MNIST(root='./data', train=False,
-                                                 download=True, transform=transform)
-
-        case 'sudoku4':
             transform = transforms.Compose(
                 [
                     transforms.Grayscale(num_output_channels=1),
                     transforms.ToTensor(),
                     transforms.Normalize((0.1307,), (0.3081,))
                 ])
-            train_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="train",
-                                       transform=transform, )
+            n_classes = 4
 
-            val_set = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="val",
-                                     transform=transform)
+        case 'emnist4':
+            path = Path("./data/EMNISTx4Sudoku")
+            download_dataset(type, path)
 
-            testset = sudoku_dataset(path="data/MNISTx4Sudoku", tr_va_te="test",
-                                     transform=transform)
+            n_classes = 4
+        case "fmnist4":
+            path = Path("./data/FMNISTx4Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 4
+        case "kmnist4":
+            path = Path("./data/KMNISTx4Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 4
+
+        case 'mnist9':
+            path = Path("./data/MNISTx9Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 9
+
+        case 'emnist9':
+            path = Path("./data/EMNISTx9Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 9
+
+        case "fmnist9":
+            path = Path("./data/FMNISTx9Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 9
+
+        case "kmnist9":
+            path = Path("./data/KMNISTx9Sudoku")
+            download_dataset(type, path)
+
+            n_classes = 9
+
         case _:
             raise ValueError(f"Dataset {type} not supported.")
+
+    train_set = sudoku_dataset(path=path, tr_va_te="train",
+                               transform=transform, type=n_classes)
+
+    val_set = sudoku_dataset(path=path, tr_va_te="val",
+                             transform=transform, type=n_classes)
+
+    testset = sudoku_dataset(path=path, tr_va_te="test",
+                             transform=transform, type=n_classes)
 
     trainloader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
                                               num_workers=8, drop_last=True)
@@ -144,4 +217,4 @@ def get_loaders(path, batch_size, type="mnist"):
     testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                              num_workers=8, drop_last=True)
 
-    return trainloader, valloader, testloader
+    return trainloader, valloader, testloader, n_classes
