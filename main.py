@@ -120,7 +120,7 @@ def calculate_points_labels(labels, all_points_comb, n_classes=4):
 @click.option('--batch-size', default=65, help='Batch size.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
-@click.option('--dataset', default='mnist9', help='Dataset to use.')
+@click.option('--dataset', default='mnist4', help='Dataset to use.')
 def main(epochs, batch_size, lr, log_interval, dataset):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -200,18 +200,19 @@ def main(epochs, batch_size, lr, log_interval, dataset):
                        cond_fn=lambda v: v.value == correct.value,
                        ),
             )
-            accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+            loss.backward()
+            optimizer.step()
+
+            accuracy(isValidSudoku(result.value.detach(), n_classes).squeeze().cpu(), s.value.squeeze().cpu())
 
             # auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
-            points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
-                       calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
+            points_auc(calculate_points_pred(result.value.cpu().detach(), all_points_comb.value.cpu().detach(), max_dist=max_dist),
+                       calculate_points_labels(labels.cpu().detach(), all_points_comb.value.cpu().detach(), n_classes=n_classes))
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
 
-            loss.backward()
-            optimizer.step()
 
         loss_log = 1 - loss.item()
         accuracy_log = accuracy.compute()
