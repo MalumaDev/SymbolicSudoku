@@ -46,7 +46,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
                                         image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
                                             np.array(pixels[i * type + j]), (28, 28))
                                 samples_pixels.append(image)
-                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
                                     break
 
                     if tr_va_te + "_cell_labels" in f:
@@ -55,7 +55,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
                                 # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
                                 cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
                                 samples_cells.append(cells)
-                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
                                     break
 
                     if tr_va_te + "_puzzle_labels" in f:
@@ -63,7 +63,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
                             for i, l in enumerate(liner.readlines()):
                                 label = 1 if l.split("\t")[0] == "1" else 0
                                 samples_labels.append(label)
-                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
                                     break
 
         samples = [(p, c, l) for p, c, l in zip(samples_pixels, samples_cells, samples_labels)]
@@ -205,7 +205,7 @@ def get_loaders(batch_size, type="mnist4"):
     train_set = sudoku_dataset(path=path, tr_va_te="train",
                                transform=transform, type=n_classes)
 
-    val_set = sudoku_dataset(path=path, tr_va_te="val",
+    val_set = sudoku_dataset(path=path, tr_va_te="valid",
                              transform=transform, type=n_classes)
 
     testset = sudoku_dataset(path=path, tr_va_te="test",
