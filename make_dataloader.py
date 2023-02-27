@@ -30,40 +30,41 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
     if not path_out.exists():
         files = os.walk(os.path.join(path))
         for root, dirs, files in tqdm(files, desc="Generating dataset"):
-            for f in files:
-                if tr_va_te + "_puzzle_pixels" in f:
-                    with open(os.path.join(root, f), "r") as liner:
-                        for i, l in enumerate(liner.readlines()):
-                            pixels = []
-                            for c in range(type * type):
-                                step = 28 * 28
-                                number = l.split("\t")[c * step:c * step + step]
-                                pixels.append([float(n) for n in number])
-                            image = np.zeros((28 * type, 28 * type))
-                            for i in range(type):
-                                for j in range(type):
-                                    image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
-                                        np.array(pixels[i * type + j]), (28, 28))
-                            samples_pixels.append(image)
-                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
-                                break
+            if "00050" in root:
+                for f in files:
+                    if tr_va_te + "_puzzle_pixels" in f:
+                        with open(os.path.join(root, f), "r") as liner:
+                            for i, l in enumerate(liner.readlines()):
+                                pixels = []
+                                for c in range(type * type):
+                                    step = 28 * 28
+                                    number = l.split("\t")[c * step:c * step + step]
+                                    pixels.append([float(n) for n in number])
+                                image = np.zeros((28 * type, 28 * type))
+                                for i in range(type):
+                                    for j in range(type):
+                                        image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
+                                            np.array(pixels[i * type + j]), (28, 28))
+                                samples_pixels.append(image)
+                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                    break
 
-                if tr_va_te + "_cell_labels" in f:
-                    with open(os.path.join(root, f), "r") as liner:
-                        for i, l in enumerate(liner.readlines()):
-                            # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
-                            cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
-                            samples_cells.append(cells)
-                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
-                                break
+                    if tr_va_te + "_cell_labels" in f:
+                        with open(os.path.join(root, f), "r") as liner:
+                            for i, l in enumerate(liner.readlines()):
+                                # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                                cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
+                                samples_cells.append(cells)
+                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                    break
 
-                if tr_va_te + "_puzzle_labels" in f:
-                    with open(os.path.join(root, f), "r") as liner:
-                        for i, l in enumerate(liner.readlines()):
-                            label = 1 if l.split("\t")[0] == "1" else 0
-                            samples_labels.append(label)
-                            if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
-                                break
+                    if tr_va_te + "_puzzle_labels" in f:
+                        with open(os.path.join(root, f), "r") as liner:
+                            for i, l in enumerate(liner.readlines()):
+                                label = 1 if l.split("\t")[0] == "1" else 0
+                                samples_labels.append(label)
+                                if (tr_va_te == "val" or tr_va_te == "test") and i >= 20:
+                                    break
 
         samples = [(p, c, l) for p, c, l in zip(samples_pixels, samples_cells, samples_labels)]
         with wds.TarWriter(str(path_out)) as dst:
@@ -199,7 +200,7 @@ def get_loaders(batch_size, type="mnist4"):
         case _:
             raise ValueError(f"Dataset {type} not supported.")
     
-    path = os.path.join(path, 'ViSudo-PC/ViSudo-PC_dimension::4_datasets::mnist_strategy::simple/dimension::' + str(type[-1]) + '/datasets::' + str(type[:-1]) + '/strategy::simple/strategy::simple/numTrain::00050')
+    path = os.path.join('/content', path)
     
     train_set = sudoku_dataset(path=path, tr_va_te="train",
                                transform=transform, type=n_classes)
