@@ -200,8 +200,7 @@ def get_loaders(batch_size, type="mnist4"):
         case _:
             raise ValueError(f"Dataset {type} not supported.")
     
-    path = os.path.join('/content', path)
-    
+
     train_set = sudoku_dataset(path=path, tr_va_te="train",
                                transform=transform, type=n_classes)
 

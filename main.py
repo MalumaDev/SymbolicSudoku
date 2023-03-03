@@ -1,4 +1,3 @@
-import itertools
 import math
 from pathlib import Path
 
@@ -53,6 +52,35 @@ def isValidSudoku(board, n_classes):
     return board2.sum(-2).all(-1).all(1) * board2.sum(-3).all(-1).all(1) * res
 
 
+def distance(a, b, dist=0.1):
+    return torch.exp(-torch.relu(torch.pairwise_distance(a, b) - dist))
+
+
+def isValidSudokuDist(board, dist=0.1):
+    correct = torch.ones(board.shape[0], dtype=torch.float, device=board.device, requires_grad=True)
+    cl = board.shape[-1]
+    scl = int(math.sqrt(cl))
+    for i in range(board.shape[-1]):
+        for j in range(board.shape[-1]):
+            for k in range(j + 1, board.shape[-1]):
+                # rows
+                correct = correct * distance(board[:, i + j * board.shape[-1]],
+                                             board[:, i + k * board.shape[-1]], dist)
+                # columns
+                correct = correct * distance(board[:, i * board.shape[-1] + j],
+                                             board[:, i * board.shape[-1] + k], dist)
+                # # squares
+                correct = correct + distance(board[:,
+                                             i * scl + j + (scl - 1) * cl * (i // scl) + (cl - scl) * (
+                                                     j // scl)],
+                                             board[:, i * scl + k + (scl - 1) * cl * (
+                                                     i // scl) + (cl - scl) * (
+                                                              k // scl)], dist
+                                             )
+
+    return correct
+
+
 def equal_image_number(image, all_points_comb):
     x1, y1, x2, y2 = [all_points_comb[:, i] for i in range(4)]
     n_classes = image.shape[-1]
@@ -98,13 +126,13 @@ def possible_to_be_same_number(all_points_comb, square_classes):
     return res
 
 
-def calculate_points_pred(pred, all_points_comb, max_dist=0.1):
+def calculate_points_pred(pred, all_points_comb):
     x1 = all_points_comb[:, 0]
     y1 = all_points_comb[:, 1]
     x2 = all_points_comb[:, 2]
     y2 = all_points_comb[:, 3]
     return (torch.pairwise_distance(pred[:, x1 + y1 * pred.shape[-1]],
-                                    pred[:, x2 + y2 * pred.shape[-1]]).reshape(-1) < max_dist).to(int)
+                                    pred[:, x2 + y2 * pred.shape[-1]]).reshape(-1))
 
 
 def calculate_points_labels(labels, all_points_comb, n_classes=4):
@@ -164,17 +192,20 @@ def main(epochs, batch_size, lr, log_interval, dataset):
 
     optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
 
-    auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    auc = torchmetrics.AUROC(task="binary", num_classes=1)
     points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
     accuracy = torchmetrics.Accuracy(num_classes=2)
+    accuracyDist = torchmetrics.Accuracy()
+    aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
     # Test metrics
-    test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    test_auc = torchmetrics.AUROC(task="binary", num_classes=1)
     test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
     test_accuracy = torchmetrics.Accuracy(num_classes=2)
+    test_accuracyDist = torchmetrics.Accuracy()
+    test_aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
 
     df = pd.DataFrame(columns=["epoch", "train_loss", "train_auc", "train_points_auc", "train_accuracy",
                                "test_auc", "test_points_auc", "test_accuracy"])
-
 
     for epoch in trange(epochs):
         for (batch_idx, batch) in enumerate(trainloader):
@@ -203,24 +234,31 @@ def main(epochs, batch_size, lr, log_interval, dataset):
             loss.backward()
             optimizer.step()
 
-            accuracy(isValidSudoku(result.value.detach(), n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+            res = isValidSudoku(result.value.detach(), n_classes).squeeze().cpu()
+            accuracy(res, s.value.squeeze().cpu())
+            auc(res.unsqueeze(-1).to(float), s.value.cpu())
+            res = isValidSudokuDist(result.value.detach(), max_dist).squeeze().cpu()
+            accuracyDist(res, s.value.squeeze().cpu())
+            aucDist(res, s.value.squeeze().cpu())
 
             # auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
-            points_auc(calculate_points_pred(result.value.cpu().detach(), all_points_comb.value.cpu().detach(), max_dist=max_dist),
-                       calculate_points_labels(labels.cpu().detach(), all_points_comb.value.cpu().detach(), n_classes=n_classes))
+            points_auc(calculate_points_pred(result.value.cpu().detach(), all_points_comb.value.cpu().detach()),
+                       calculate_points_labels(labels.cpu().detach(), all_points_comb.value.cpu().detach(),
+                                               n_classes=n_classes))
 
             if batch_idx % log_interval == 0:
                 print(f"Loss: {loss.item()}")
 
-
         loss_log = 1 - loss.item()
         accuracy_log = accuracy.compute()
-        # auc_log = auc.compute()
+        accuracyDist_log = accuracyDist.compute()
+        aucDist_log = aucDist.compute()
+        auc_log = auc.compute()
         points_auc_log = points_auc.compute()
         print(
-            f"Epoch {epoch} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f},"
-            f" Task AUC: {points_auc_log:.5f}")
+            f"Epoch {epoch} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f}, Puzzle AUC: {auc_log:.5f}"
+            f" Task AUC: {points_auc_log:.5f}, Accuracy Dist: {accuracyDist_log:.3f}, AUC Dist: {aucDist_log:.3f}")
 
         with torch.no_grad():
             cnn.eval()
@@ -236,28 +274,42 @@ def main(epochs, batch_size, lr, log_interval, dataset):
                 result = cnn(x)
                 result = ltn.Variable("result", result)
 
-                test_accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+                res = isValidSudoku(result.value, n_classes).squeeze().cpu()
+                test_accuracy(res, s.value.squeeze().cpu())
+                test_auc(res.to(float), s.value.squeeze().cpu())
+                res = isValidSudokuDist(result.value, max_dist).squeeze().cpu()
+                test_accuracyDist(res, s.value.squeeze().cpu())
+                test_aucDist(res, s.value.squeeze().cpu())
 
                 # test_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
-                test_points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
-                                calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
-
+                test_points_auc(
+                    calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu()),
+                    calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
 
             # test_auc_log = test_auc.compute()
             test_points_auc_log = test_points_auc.compute()
             test_accuracy_log = test_accuracy.compute()
+            test_accuracyDist_log = test_accuracyDist.compute()
+            test_aucDist_log = test_aucDist.compute()
+            test_auc_log = test_auc.compute()
 
             print(
-                f"Epoch {epoch} Validation: Puzzle Accuracy: {test_accuracy_log:.3f},"
-                f" Task AUC: {test_points_auc_log:.5f}")
+                f"Epoch {epoch} Validation: Puzzle Accuracy: {test_accuracy_log:.3f}, Puzzle AUC: {test_auc_log:.3f}"
+                f" Task AUC: {test_points_auc_log:.5f}, Accuracy Dist: {test_accuracyDist_log:.3f}, AUC Dist: {test_aucDist_log:.3f}")
 
             df = df.append({"epoch": epoch,
                             "train_loss": loss_log,
                             "train_points_auc": points_auc_log,
                             "train_accuracy": accuracy_log,
+                            "train_accuracyDist": accuracyDist_log,
+                            "train_aucDist": aucDist_log,
+
                             "test_points_auc": test_points_auc_log,
-                            "test_accuracy": test_accuracy_log}, ignore_index=True)
+                            "test_accuracy": test_accuracy_log,
+                            "test_accuracyDist": test_accuracyDist_log,
+                            "test_aucDist": test_aucDist_log,
+                            }, ignore_index=True)
             df.to_csv(res_path, index=False)
 
         test_accuracy.reset()
@@ -268,7 +320,6 @@ def main(epochs, batch_size, lr, log_interval, dataset):
         accuracy.reset()
         points_auc.reset()
         # auc.reset()
-
 
 
 if __name__ == '__main__':
