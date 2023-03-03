@@ -320,6 +320,40 @@ def main(epochs, batch_size, lr, log_interval, dataset):
         accuracy.reset()
         points_auc.reset()
         # auc.reset()
+        
+    # Test metrics
+    test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
+    test_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
+
+    with torch.no_grad():
+      cnn.eval()
+      for (batch_idx, batch) in enumerate(testloader):
+          x, labels, sudoku_label = batch
+
+          x = x.to(device)
+          labels = labels.to(device)
+          sudoku_label = sudoku_label.to(device)
+
+          s = ltn.Variable("s", sudoku_label)
+
+          result = cnn(x)
+          result = ltn.Variable("result", result)
+
+          test_accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+
+          # test_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
+
+          test_points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
+                          calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
+
+
+    test_points_auc_log = test_points_auc.compute()
+    test_accuracy_log = test_accuracy.compute()
+
+    print(
+        f"Test Puzzle Accuracy: {test_accuracy_log:.3f},"
+        f" Task AUC: {test_points_auc_log:.5f}"
 
 
 if __name__ == '__main__':
