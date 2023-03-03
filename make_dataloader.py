@@ -20,7 +20,7 @@ def bar_progress(current, total, width=80):
     sys.stdout.flush()
 
 
-def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
+def sudoku_dataset(path, tr_va_te="train", transform=None, type=4, split=None):
     transform = transform
     type = type
     path_out = Path(path) / f"offline_{tr_va_te}.tar"
@@ -30,41 +30,43 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4):
     if not path_out.exists():
         files = os.walk(os.path.join(path))
         for root, dirs, files in tqdm(files, desc="Generating dataset"):
-            if "00050" in root:
-                for f in files:
-                    if tr_va_te + "_puzzle_pixels" in f:
-                        with open(os.path.join(root, f), "r") as liner:
-                            for i, l in enumerate(liner.readlines()):
-                                pixels = []
-                                for c in range(type * type):
-                                    step = 28 * 28
-                                    number = l.split("\t")[c * step:c * step + step]
-                                    pixels.append([float(n) for n in number])
-                                image = np.zeros((28 * type, 28 * type))
-                                for i in range(type):
-                                    for j in range(type):
-                                        image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
-                                            np.array(pixels[i * type + j]), (28, 28))
-                                samples_pixels.append(image)
-                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
-                                    break
+            if "numTrain::00050" in os.path.join(root, f) and "overlap::0.00" in os.path.join(root, f):
+                if split is None or ("split::0" + str(split + 1)) in os.path.join(root, f) or (
+                        "split::" + str(split + 1)) in os.path.join(root, f):
+                    for f in files:
+                        if tr_va_te + "_puzzle_pixels" in f:
+                            with open(os.path.join(root, f), "r") as liner:
+                                for i, l in enumerate(liner.readlines()):
+                                    pixels = []
+                                    for c in range(type * type):
+                                        step = 28 * 28
+                                        number = l.split("\t")[c * step:c * step + step]
+                                        pixels.append([float(n) for n in number])
+                                    image = np.zeros((28 * type, 28 * type))
+                                    for i in range(type):
+                                        for j in range(type):
+                                            image[i * 28:(i + 1) * 28, j * 28:(j + 1) * 28] = np.reshape(
+                                                np.array(pixels[i * type + j]), (28, 28))
+                                    samples_pixels.append(image)
+                                    if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
+                                        break
 
-                    if tr_va_te + "_cell_labels" in f:
-                        with open(os.path.join(root, f), "r") as liner:
-                            for i, l in enumerate(liner.readlines()):
-                                # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
-                                cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
-                                samples_cells.append(cells)
-                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
-                                    break
+                        if tr_va_te + "_cell_labels" in f:
+                            with open(os.path.join(root, f), "r") as liner:
+                                for i, l in enumerate(liner.readlines()):
+                                    # cells = [((c % type, c // type), int(j.split("_")[1])) for c, j in enumerate(l.split("\t"))]
+                                    cells = [int(j.split("_")[1]) for c, j in enumerate(l.split("\t"))]
+                                    samples_cells.append(cells)
+                                    if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
+                                        break
 
-                    if tr_va_te + "_puzzle_labels" in f:
-                        with open(os.path.join(root, f), "r") as liner:
-                            for i, l in enumerate(liner.readlines()):
-                                label = 1 if l.split("\t")[0] == "1" else 0
-                                samples_labels.append(label)
-                                if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
-                                    break
+                        if tr_va_te + "_puzzle_labels" in f:
+                            with open(os.path.join(root, f), "r") as liner:
+                                for i, l in enumerate(liner.readlines()):
+                                    label = 1 if l.split("\t")[0] == "1" else 0
+                                    samples_labels.append(label)
+                                    if (tr_va_te == "valid" or tr_va_te == "test") and i >= 100:
+                                        break
 
         samples = [(p, c, l) for p, c, l in zip(samples_pixels, samples_cells, samples_labels)]
         with wds.TarWriter(str(path_out)) as dst:
@@ -136,7 +138,7 @@ def download_dataset(dataset, path):
             os.remove(path / "data.zip")
 
 
-def get_loaders(batch_size, type="mnist4"):
+def get_loaders(batch_size, type="mnist4", splits=10):
     transform = transforms.Compose(
         [
             transforms.Grayscale(num_output_channels=1),
@@ -199,24 +201,29 @@ def get_loaders(batch_size, type="mnist4"):
 
         case _:
             raise ValueError(f"Dataset {type} not supported.")
-    
 
-    train_set = sudoku_dataset(path=path, tr_va_te="train",
-                               transform=transform, type=n_classes)
+    trainloader = []
+    valloader = []
+    testloader = []
 
-    val_set = sudoku_dataset(path=path, tr_va_te="valid",
-                             transform=transform, type=n_classes)
+    for split in range(splits):
+        train_set = sudoku_dataset(path=path, tr_va_te="train",
+                                   transform=transform, type=n_classes, split=split)
 
-    testset = sudoku_dataset(path=path, tr_va_te="test",
-                             transform=transform, type=n_classes)
+        val_set = sudoku_dataset(path=path, tr_va_te="valid",
+                                 transform=transform, type=n_classes, split=split)
 
-    trainloader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                              num_workers=8, drop_last=True)
+        testset = sudoku_dataset(path=path, tr_va_te="test",
+                                 transform=transform, type=n_classes, split=split)
 
-    valloader = torch.utils.data.DataLoader(val_set, batch_size=batch_size,
-                                            num_workers=8, drop_last=True)
+        trainloader.append(torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                                       num_workers=8, drop_last=True))
 
-    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                             num_workers=8, drop_last=True)
+        valloader.append(torch.utils.data.DataLoader(val_set, batch_size=batch_size,
+                                                     num_workers=8, drop_last=True))
+
+        testloader.append(torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                                      num_workers=8, drop_last=True))
+
 
     return trainloader, valloader, testloader, n_classes

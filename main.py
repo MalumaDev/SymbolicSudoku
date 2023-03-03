@@ -144,18 +144,21 @@ def calculate_points_labels(labels, all_points_comb, n_classes=4):
 
 
 @click.command()
-@click.option('--epochs', default=20, help='Number of epochs to train.')
-@click.option('--batch-size', default=65, help='Batch size.')
+@click.option('--splits', default=10, help='Number of splits to train on (Max 11).')
+@click.option('--batch-size', default=8, help='Batch size.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
 @click.option('--dataset', default='mnist4', help='Dataset to use.')
-def main(epochs, batch_size, lr, log_interval, dataset):
+def main(splits, batch_size, lr, log_interval, dataset):
+    assert 1 <= splits and splits <= 11, \
+        "Number of splits should be between 1 and 11!"
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     res_path = Path(f"results/{dataset}.csv")
     res_path.parent.mkdir(parents=True, exist_ok=True)
 
-    trainloader, valloader, testloader, n_classes = get_loaders(batch_size, type=dataset)
+    trainloader, valloader, valloader, n_classes = get_loaders(batch_size, type=dataset, splits=splits)
     max_dist = 0.1
 
     Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
@@ -194,22 +197,31 @@ def main(epochs, batch_size, lr, log_interval, dataset):
 
     auc = torchmetrics.AUROC(task="binary", num_classes=1)
     points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
-    accuracy = torchmetrics.Accuracy(num_classes=2)
+    accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
     accuracyDist = torchmetrics.Accuracy()
     aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
-    # Test metrics
-    test_auc = torchmetrics.AUROC(task="binary", num_classes=1)
-    test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
-    test_accuracy = torchmetrics.Accuracy(num_classes=2)
-    test_accuracyDist = torchmetrics.Accuracy()
-    test_aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    train_split_mean_acc = 0.0
+    train_split_mean_auc = 0.0
+    train_split_mean_p_auc = 0.0
+    train_split_mean_accDist = 0.0
+    train_split_mean_aucDist = 0.0
+    # Val metrics
+    val_auc = torchmetrics.AUROC(task="binary", num_classes=1)
+    val_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
+    val_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
+    val_accuracyDist = torchmetrics.Accuracy()
+    val_aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
+    val_split_mean_acc = 0.0
+    val_split_mean_auc = 0.0
+    val_split_mean_p_auc = 0.0
+    val_split_mean_accDist = 0.0
+    val_split_mean_aucDist = 0.0
 
-    df = pd.DataFrame(columns=["epoch", "train_loss", "train_auc", "train_points_auc", "train_accuracy",
-                               "test_auc", "test_points_auc", "test_accuracy"])
+    df = pd.DataFrame(columns=["split", "train_loss", "train_auc", "train_points_auc", "train_accuracy",
+                               "val_auc", "val_points_auc", "val_accuracy"])
 
-    for epoch in trange(epochs):
-        for (batch_idx, batch) in enumerate(trainloader):
-
+    for split in trange(splits):
+        for (batch_idx, batch) in enumerate(trainloader[split]):
             x, labels, sudoku_label = batch
 
             x = x.to(device)
@@ -256,13 +268,19 @@ def main(epochs, batch_size, lr, log_interval, dataset):
         aucDist_log = aucDist.compute()
         auc_log = auc.compute()
         points_auc_log = points_auc.compute()
+        train_split_mean_acc += accuracy_log
+        train_split_mean_auc += auc_log
+        train_split_mean_p_auc += points_auc_log
+        train_split_mean_accDist += accuracyDist_log
+        train_split_mean_aucDist += aucDist_log
+
         print(
-            f"Epoch {epoch} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f}, Puzzle AUC: {auc_log:.5f}"
+            f"Split {split} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f}, Puzzle AUC: {auc_log:.5f}"
             f" Task AUC: {points_auc_log:.5f}, Accuracy Dist: {accuracyDist_log:.3f}, AUC Dist: {aucDist_log:.3f}")
 
         with torch.no_grad():
             cnn.eval()
-            for (batch_idx, batch) in enumerate(valloader):
+            for (batch_idx, batch) in enumerate(valloader[split]):
                 x, labels, sudoku_label = batch
 
                 x = x.to(device)
@@ -275,86 +293,139 @@ def main(epochs, batch_size, lr, log_interval, dataset):
                 result = ltn.Variable("result", result)
 
                 res = isValidSudoku(result.value, n_classes).squeeze().cpu()
-                test_accuracy(res, s.value.squeeze().cpu())
-                test_auc(res.to(float), s.value.squeeze().cpu())
+                val_accuracy(res, s.value.squeeze().cpu())
+                val_auc(res.to(float), s.value.squeeze().cpu())
                 res = isValidSudokuDist(result.value, max_dist).squeeze().cpu()
-                test_accuracyDist(res, s.value.squeeze().cpu())
-                test_aucDist(res, s.value.squeeze().cpu())
+                val_accuracyDist(res, s.value.squeeze().cpu())
+                val_aucDist(res, s.value.squeeze().cpu())
 
-                # test_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
+                # val_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
-                test_points_auc(
+                val_points_auc(
                     calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu()),
                     calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
 
-            # test_auc_log = test_auc.compute()
-            test_points_auc_log = test_points_auc.compute()
-            test_accuracy_log = test_accuracy.compute()
-            test_accuracyDist_log = test_accuracyDist.compute()
-            test_aucDist_log = test_aucDist.compute()
-            test_auc_log = test_auc.compute()
+            # val_auc_log = val_auc.compute()
+            val_points_auc_log = val_points_auc.compute()
+            val_accuracy_log = val_accuracy.compute()
+            val_accuracyDist_log = val_accuracyDist.compute()
+            val_aucDist_log = val_aucDist.compute()
+            val_auc_log = val_auc.compute()
+            val_split_mean_acc += val_accuracy_log
+            val_split_mean_auc += val_auc_log
+            val_split_mean_p_auc += val_points_auc_log
+            val_split_mean_accDist += val_accuracyDist_log
+            val_split_mean_aucDist += val_aucDist_log
 
             print(
-                f"Epoch {epoch} Validation: Puzzle Accuracy: {test_accuracy_log:.3f}, Puzzle AUC: {test_auc_log:.3f}"
-                f" Task AUC: {test_points_auc_log:.5f}, Accuracy Dist: {test_accuracyDist_log:.3f}, AUC Dist: {test_aucDist_log:.3f}")
+                f"Split {split} Validation: Puzzle Accuracy: {val_accuracy_log:.3f}, Puzzle AUC: {val_auc_log:.3f}"
+                f" Task AUC: {val_points_auc_log:.5f}, Accuracy Dist: {val_accuracyDist_log:.3f}, AUC Dist: {val_aucDist_log:.3f}")
 
-            df = df.append({"epoch": epoch,
+            df = df.append({"Split": split,
                             "train_loss": loss_log,
                             "train_points_auc": points_auc_log,
                             "train_accuracy": accuracy_log,
                             "train_accuracyDist": accuracyDist_log,
                             "train_aucDist": aucDist_log,
 
-                            "test_points_auc": test_points_auc_log,
-                            "test_accuracy": test_accuracy_log,
-                            "test_accuracyDist": test_accuracyDist_log,
-                            "test_aucDist": test_aucDist_log,
+                            "val_points_auc": val_points_auc_log,
+                            "val_accuracy": val_accuracy_log,
+                            "val_accuracyDist": val_accuracyDist_log,
+                            "val_aucDist": val_aucDist_log,
                             }, ignore_index=True)
             df.to_csv(res_path, index=False)
 
-        test_accuracy.reset()
-        test_points_auc.reset()
-        # test_auc.reset()
+        val_accuracy.reset()
+        val_points_auc.reset()
+        # val_auc.reset()
         cnn.train()
 
         accuracy.reset()
         points_auc.reset()
         # auc.reset()
-        
+
+    train_split_mean_acc = train_split_mean_acc / splits
+    train_split_mean_auc = train_split_mean_auc / splits
+    train_split_mean_p_auc = train_split_mean_p_auc / splits
+    train_split_mean_accDist = train_split_mean_accDist / splits
+    train_split_mean_aucDist = train_split_mean_aucDist / splits
+    val_split_mean_acc = val_split_mean_acc / splits
+    val_split_mean_auc = val_split_mean_auc / splits
+    val_split_mean_p_auc = val_split_mean_p_auc / splits
+    val_split_mean_accDist = val_split_mean_accDist / splits
+    val_split_mean_aucDist = val_split_mean_aucDist / splits
+
+    print("\nFinal mean-over-split performances:"
+          f"\nTrain: Puzzle Accuracy: {train_split_mean_acc:.3f},"
+          f" Puzzle AUC: {val_split_mean_auc:.5f}",
+          f" Task AUC: {train_split_mean_p_auc:.5f}"
+          f"Accuracy Dist: {train_split_mean_accDist:.3f}"
+          f"AUC Dist: {train_split_mean_aucDist:.3f}"
+          f"\nValidation: Puzzle Accuracy: {val_split_mean_acc:.3f},"
+          f" Puzzle AUC: {val_split_mean_auc:.5f}",
+          f" Task AUC: {val_split_mean_p_auc:.5f}",
+          f"Accuracy Dist: {val_split_mean_accDist:.3f}"
+          f"AUC Dist: {val_split_mean_aucDist:.3f}")
+
     # Test metrics
     test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
     test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
     test_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
+    test_split_mean_acc = 0.0
+    test_split_mean_auc = 0.0
+    test_split_mean_p_auc = 0.0
+    test_split_mean_accDist = 0.0
+    test_split_mean_aucDist = 0.0
 
     with torch.no_grad():
-      cnn.eval()
-      for (batch_idx, batch) in enumerate(testloader):
-          x, labels, sudoku_label = batch
+        cnn.eval()
+        for split in trange(splits):
+          for (batch_idx, batch) in enumerate(testloader[split]):
+              x, labels, sudoku_label = batch
 
-          x = x.to(device)
-          labels = labels.to(device)
-          sudoku_label = sudoku_label.to(device)
+              x = x.to(device)
+              labels = labels.to(device)
+              sudoku_label = sudoku_label.to(device)
 
-          s = ltn.Variable("s", sudoku_label)
+              s = ltn.Variable("s", sudoku_label)
 
-          result = cnn(x)
-          result = ltn.Variable("result", result)
+              result = cnn(x)
+              result = ltn.Variable("result", result)
 
-          test_accuracy(isValidSudoku(result.value, n_classes).squeeze().cpu(), s.value.squeeze().cpu())
+              res = isValidSudoku(result.value, n_classes).squeeze().cpu()
+              test_accuracy(res, s.value.squeeze().cpu())
+              test_auc(res.to(float), s.value.squeeze().cpu())
+              res = isValidSudokuDist(result.value, max_dist).squeeze().cpu()
+              test_accuracyDist(res, s.value.squeeze().cpu())
+              test_aucDist(res, s.value.squeeze().cpu())
 
-          # test_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
+              # val_auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
-          test_points_auc(calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu(), max_dist=max_dist),
-                          calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
+              test_points_auc(
+                  calculate_points_pred(result.value.cpu(), all_points_comb.value.cpu()),
+                  calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
 
+              # val_auc_log = val_auc.compute()
+          test_points_auc_log = test_points_auc.compute()
+          test_accuracy_log = test_accuracy.compute()
+          test_accuracyDist_log = test_accuracyDist.compute()
+          test_aucDist_log = test_aucDist.compute()
+          test_auc_log = test_auc.compute()
+          test_split_mean_acc += test_accuracy_log
+          test_split_mean_auc += test_auc_log
+          test_split_mean_p_auc += test_points_auc_log
+          test_split_mean_accDist += test_accuracyDist_log
+          test_split_mean_aucDist += test_aucDist_log
 
-    test_points_auc_log = test_points_auc.compute()
-    test_accuracy_log = test_accuracy.compute()
+    test_split_mean_acc = test_split_mean_acc / splits
+    test_split_mean_auc = test_split_mean_auc / splits
+    test_split_mean_p_auc = test_split_mean_p_auc / splits
+    test_split_mean_accDist = test_split_mean_accDist / splits
+    test_split_mean_aucDist = test_split_mean_aucDist / splits
 
-    print(
-        f"Test Puzzle Accuracy: {test_accuracy_log:.3f},"
-        f" Task AUC: {test_points_auc_log:.5f}"
-
+    print("\n"
+        f"Test: Puzzle Accuracy: {test_split_mean_acc:.3f}, Puzzle AUC: {test_split_mean_auc:.3f}"
+        f" Task AUC: {test_split_mean_p_auc:.5f}, Accuracy Dist: {test_split_mean_accDist:.3f}, AUC Dist: {test_split_mean_aucDist:.3f}")
 
 if __name__ == '__main__':
     main()
