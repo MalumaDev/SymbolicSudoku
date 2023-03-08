@@ -5,7 +5,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-import torchvision
 import torchvision.transforms as transforms
 import webdataset as wds
 import wget
@@ -23,7 +22,7 @@ def bar_progress(current, total, width=80):
 def sudoku_dataset(path, tr_va_te="train", transform=None, type=4, split=None):
     transform = transform
     type = type
-    path_out = Path(path) / f"offline_{tr_va_te}.tar"
+    path_out = Path(path) / f"offline_{tr_va_te}_{split}.tar"
     samples_cells = []
     samples_pixels = []
     samples_labels = []
@@ -33,7 +32,7 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4, split=None):
             for f in files:
                 if "numTrain::00050" in os.path.join(root, f) and "overlap::0.00" in os.path.join(root, f):
                     if split is None or ("split::0" + str(split + 1)) in os.path.join(root, f) or (
-                        "split::" + str(split + 1)) in os.path.join(root, f):
+                            "split::" + str(split + 1)) in os.path.join(root, f):
                         if tr_va_te + "_puzzle_pixels" in f:
                             with open(os.path.join(root, f), "r") as liner:
                                 for i, l in enumerate(liner.readlines()):
@@ -83,8 +82,9 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4, split=None):
 
     return wds.WebDataset(str(path_out), shardshuffle=True, handler=wds.warn_and_continue).shuffle(
         100000 if tr_va_te == "train" else 0) \
-        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(lambda x: image_to_sub_square(transform(x),type=type),
-                                                                        None, None)
+        .decode("pil").to_tuple("jpg;png", "cell.pyd", "cls").map_tuple(
+        lambda x: image_to_sub_square(transform(x), type=type),
+        None, None)
 
 
 def image_to_sub_square(image, type=4):
@@ -138,7 +138,7 @@ def download_dataset(dataset, path):
             os.remove(path / "data.zip")
 
 
-def get_loaders(batch_size, type="mnist4", splits=10):
+def get_loaders(batch_size, type="mnist4", split=10):
     transform = transforms.Compose(
         [
             transforms.Grayscale(num_output_channels=1),
@@ -202,28 +202,22 @@ def get_loaders(batch_size, type="mnist4", splits=10):
         case _:
             raise ValueError(f"Dataset {type} not supported.")
 
-    trainloader = []
-    valloader = []
-    testloader = []
+    train_set = sudoku_dataset(path=path, tr_va_te="train",
+                               transform=transform, type=n_classes, split=split)
 
-    for split in range(splits):
-        train_set = sudoku_dataset(path=path, tr_va_te="train",
-                                   transform=transform, type=n_classes, split=split)
+    val_set = sudoku_dataset(path=path, tr_va_te="valid",
+                             transform=transform, type=n_classes, split=split)
 
-        val_set = sudoku_dataset(path=path, tr_va_te="valid",
-                                 transform=transform, type=n_classes, split=split)
+    testset = sudoku_dataset(path=path, tr_va_te="test",
+                             transform=transform, type=n_classes, split=split)
 
-        testset = sudoku_dataset(path=path, tr_va_te="test",
-                                 transform=transform, type=n_classes, split=split)
+    trainloader = torch.utils.data.DataLoader(train_set, batch_size=batch_size,
+                                              num_workers=12, drop_last=True)
 
-        trainloader.append(torch.utils.data.DataLoader(train_set, batch_size=batch_size,
-                                                       num_workers=8, drop_last=True))
+    valloader = torch.utils.data.DataLoader(val_set, batch_size=batch_size,
+                                            num_workers=12, drop_last=True)
 
-        valloader.append(torch.utils.data.DataLoader(val_set, batch_size=batch_size,
-                                                     num_workers=8, drop_last=True))
-
-        testloader.append(torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                                      num_workers=8, drop_last=True))
-
+    testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
+                                             num_workers=12, drop_last=True)
 
     return trainloader, valloader, testloader, n_classes
