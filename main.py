@@ -144,15 +144,15 @@ def calculate_points_labels(labels, all_points_comb, n_classes=4):
 
 
 @click.command()
-@click.option('--epochs', default=20, help='Number of epochs to train.')
+@click.option('--epochs', default=100, help='Number of epochs to train.')
 @click.option('--split', default=0, help='Number of split to train on (Max 11).')
 @click.option('--batch-size', default=65, help='Batch size.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
 @click.option('--dataset', default='mnist4', help='Dataset to use.')
-@click.option('--generate_dataset', default=False, help='Generate dataset.')
+@click.option('--generate_dataset', default=False, help='Generate dataset.', is_flag=True)
 def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs):
-    assert 0 <= split and split <= 11, \
+    assert 0 <= split <= 11, \
         "Number of split should be between 1 and 11!"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -266,11 +266,11 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
                 print(f"Loss: {loss.item()}")
 
         loss_log = 1 - loss.item()
-        accuracy_log = accuracy.compute()
-        accuracyDist_log = accuracyDist.compute()
-        aucDist_log = aucDist.compute()
-        auc_log = auc.compute()
-        points_auc_log = points_auc.compute()
+        accuracy_log = accuracy.compute().cpu().numpy().item()
+        accuracyDist_log = accuracyDist.compute().cpu().numpy().item()
+        aucDist_log = aucDist.compute().cpu().numpy().item()
+        auc_log = auc.compute().cpu().numpy().item()
+        points_auc_log = points_auc.compute().cpu().numpy().item()
 
         print(
             f"Epoch {epoch} Training: Sat Level {loss_log:.5f} Puzzle Accuracy: {accuracy_log:.3f}, Puzzle AUC: {auc_log:.5f}"
@@ -304,11 +304,11 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
                     calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
 
             # val_auc_log = val_auc.compute()
-            val_points_auc_log = val_points_auc.compute()
-            val_accuracy_log = val_accuracy.compute()
-            val_accuracyDist_log = val_accuracyDist.compute()
-            val_aucDist_log = val_aucDist.compute()
-            val_auc_log = val_auc.compute()
+            val_points_auc_log = val_points_auc.compute().cpu().numpy().item()
+            val_accuracy_log = val_accuracy.compute().cpu().numpy().item()
+            val_accuracyDist_log = val_accuracyDist.compute().cpu().numpy().item()
+            val_aucDist_log = val_aucDist.compute().cpu().numpy().item()
+            val_auc_log = val_auc.compute().cpu().numpy().item()
 
             print(
                 f"Epoch {epoch} Validation: Puzzle Accuracy: {val_accuracy_log:.3f}, Puzzle AUC: {val_auc_log:.3f}"
@@ -369,11 +369,11 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
                 calculate_points_labels(labels.cpu(), all_points_comb.value.cpu(), n_classes=n_classes))
 
             # val_auc_log = val_auc.compute()
-        test_points_auc_log = test_points_auc.compute()
-        test_accuracy_log = test_accuracy.compute()
-        test_accuracyDist_log = test_accuracyDist.compute()
-        test_aucDist_log = test_aucDist.compute()
-        test_auc_log = test_auc.compute()
+        test_points_auc_log = test_points_auc.compute().cpu().numpy().item()
+        test_accuracy_log = test_accuracy.compute().cpu().numpy().item()
+        test_accuracyDist_log = test_accuracyDist.compute().cpu().numpy().item()
+        test_aucDist_log = test_aucDist.compute().cpu().numpy().item()
+        test_auc_log = test_auc.compute().cpu().numpy().item()
 
     df = df.append({"epoch": -1,
                     "test_auc": test_auc_log,

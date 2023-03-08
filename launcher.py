@@ -1,7 +1,14 @@
 # Run main.py with different arguments
 import os
 
-datasets_key = ["mnist4", "mnist9"]#, "emnist4", "emnist9", "fmnist4", "fmnist9", "kmnist4", "kmnist9"]
+from tqdm import tqdm, trange
 
-for dataset in datasets_key:
-    os.system(f"python main.py --dataset {dataset} --generate_dataset")
+datasets_key = ["mnist"]#, "emnist", "fmnist", "kmnist", ]
+sizes = [4]#, 9]
+only_dataset = False
+
+for dataset in tqdm(datasets_key):
+    for size in sizes:
+        d = f"{dataset}{size}"
+        for split in trange(11):
+            os.system(f"python main.py --dataset {d} --split {split}" + (" --generate_dataset" if only_dataset else ""))
