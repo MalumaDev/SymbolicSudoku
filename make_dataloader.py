@@ -30,10 +30,10 @@ def sudoku_dataset(path, tr_va_te="train", transform=None, type=4, split=None):
     if not path_out.exists():
         files = os.walk(os.path.join(path))
         for root, dirs, files in tqdm(files, desc="Generating dataset"):
-            if "numTrain::00050" in os.path.join(root, f) and "overlap::0.00" in os.path.join(root, f):
-                if split is None or ("split::0" + str(split + 1)) in os.path.join(root, f) or (
+            for f in files:
+                if "numTrain::00050" in os.path.join(root, f) and "overlap::0.00" in os.path.join(root, f):
+                    if split is None or ("split::0" + str(split + 1)) in os.path.join(root, f) or (
                         "split::" + str(split + 1)) in os.path.join(root, f):
-                    for f in files:
                         if tr_va_te + "_puzzle_pixels" in f:
                             with open(os.path.join(root, f), "r") as liner:
                                 for i, l in enumerate(liner.readlines()):
