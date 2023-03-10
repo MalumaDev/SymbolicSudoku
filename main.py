@@ -1,3 +1,7 @@
+import warnings
+
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
 import math
 from pathlib import Path
 
@@ -119,7 +123,8 @@ def possible_to_be_same_number(all_points_comb, square_classes):
 
     samex = x1 == x2
     samey = y1 == y2
-    same_square = (x1 // square_classes == x2 // square_classes) * (y1 // square_classes == y2 // square_classes)
+    same_square = ((x1 // square_classes) == (x2 // square_classes)) * (
+                (y1 // square_classes) == (y2 // square_classes))
 
     res = samex * samey + torch.logical_not(same_square) * torch.logical_not(samex + samey)
 
@@ -144,18 +149,21 @@ def calculate_points_labels(labels, all_points_comb, n_classes=4):
 
 
 @click.command()
-@click.option('--epochs', default=100, help='Number of epochs to train.')
+@click.option('--epochs', default=200, help='Number of epochs to train.')
 @click.option('--split', default=0, help='Number of split to train on (Max 11).')
-@click.option('--batch-size', default=65, help='Batch size.')
+@click.option('--batch-size', default=8, help='Batch size.')
 @click.option('--lr', default=0.001, help='Learning rate.')
 @click.option('--log_interval', default=100, help='How often to log results.')
 @click.option('--dataset', default='mnist4', help='Dataset to use.')
 @click.option('--generate_dataset', default=False, help='Generate dataset.', is_flag=True)
-def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs):
+@click.option('--algorithm', default=0, help='Algorithm to use.')
+def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs, algorithm):
     assert 0 <= split <= 11, \
         "Number of split should be between 1 and 11!"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cpu")
+    ltn.device = device
 
     res_path = Path(f"results/{dataset}_split_{split:02d}.csv")
     res_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,29 +171,6 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
     trainloader, valloader, testloader, n_classes = get_loaders(batch_size, type=dataset, split=split)
     if generate_dataset:
         exit()
-
-    max_dist = 0.1
-
-    Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
-    Implies = ltn.Connective(ltn.fuzzy_ops.ImpliesReichenbach())
-
-    Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2), quantifier="f")
-    Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2), quantifier="e")
-
-    square_classes = ltn.Constant(torch.tensor(int(math.sqrt(n_classes))))
-
-    EqualImageNumber = ltn.Predicate(func=equal_image_number)
-    PossibleToBeSameNumber = ltn.Predicate(func=possible_to_be_same_number)
-    PossibleToBeSameNumberNotEqual = ltn.Predicate(func=possible_to_be_same_number_not_equal)
-
-    sat_agg = ltn.fuzzy_ops.SatAgg()
-
-    cnn = SudokuNet(n_classes=n_classes)
-    cnn.to(device)
-    cnn.train()
-
-    # all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(
-    #     list(itertools.product(*[list(range(n_classes)) for _ in range(n_classes)]))))
 
     all_points_comb = []
     for i in trange(n_classes):
@@ -197,8 +182,59 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
     all_points_comb = ltn.Variable(f"all_points_comb", torch.tensor(all_points_comb, device=device))
     correct = ltn.Constant(torch.tensor(1, device=device))
     wrong = ltn.Constant(torch.tensor(0))
+    step_func = None
 
-    optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
+    match algorithm:
+        case 0:
+            max_dist = 0.1
+
+            Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
+            Implies = ltn.Connective(ltn.fuzzy_ops.ImpliesReichenbach())
+
+            Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2), quantifier="f")
+            Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2), quantifier="e")
+            tmp = torch.tensor(int(math.sqrt(n_classes)), device=device)
+            square_classes = ltn.Constant(tmp, trainable=False)
+
+            EqualImageNumber = ltn.Predicate(func=equal_image_number)
+            PossibleToBeSameNumber = ltn.Predicate(func=possible_to_be_same_number)
+            PossibleToBeSameNumberNotEqual = ltn.Predicate(func=possible_to_be_same_number_not_equal)
+
+            sat_agg = ltn.fuzzy_ops.SatAgg()
+
+            cnn = SudokuNet(n_classes=n_classes)
+            cnn.to(device)
+            cnn.train()
+
+            optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
+
+            def func(x, labels, sudoku_label, optimizer):
+                s = ltn.Variable("s", sudoku_label)
+
+                optimizer.zero_grad()
+                result = cnn(x)
+                result = ltn.Variable("result", result)
+
+                loss = 1 - sat_agg(
+                    Forall(ltn.diag(s, result),
+                           Forall([all_points_comb],
+                                  Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
+                                          Not(EqualImageNumber(result, all_points_comb)))),
+                           cond_vars=s,
+                           cond_fn=lambda v: v.value == correct.value,
+                           ),
+                )
+
+                return loss, result
+
+            step_func = func
+        case 1:
+            pass
+        case 2:
+            pass
+        case _:
+            print("Algorithm not found!")
+            exit(0)
 
     auc = torchmetrics.AUROC(task="binary", num_classes=1)
     points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
@@ -206,9 +242,9 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
     accuracyDist = torchmetrics.Accuracy()
     aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
     # Test metrics
-    test_auc = torchmetrics.AUROC(task="binary", num_classes=1)
+    test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
     test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
-    test_accuracy = torchmetrics.Accuracy(num_classes=2)
+    test_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
     test_accuracyDist = torchmetrics.Accuracy()
     test_aucDist = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
 
@@ -231,30 +267,17 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
             labels = labels.to(device)
             sudoku_label = sudoku_label.to(device)
 
-            s = ltn.Variable("s", sudoku_label)
+            loss, result = step_func(x, labels, sudoku_label, optimizer)
 
-            optimizer.zero_grad()
-            result = cnn(x)
-            result = ltn.Variable("result", result)
-
-            loss = 1 - sat_agg(
-                Forall(ltn.diag(s, result),
-                       Forall([all_points_comb],
-                              Implies(Not(PossibleToBeSameNumber(all_points_comb, square_classes)),
-                                      Not(EqualImageNumber(result, all_points_comb)))),
-                       cond_vars=s,
-                       cond_fn=lambda v: v.value == correct.value,
-                       ),
-            )
             loss.backward()
             optimizer.step()
 
             res = isValidSudoku(result.value.detach(), n_classes).squeeze().cpu()
-            accuracy(res, s.value.squeeze().cpu())
-            auc(res.unsqueeze(-1).to(float), s.value.cpu())
+            accuracy(res, sudoku_label.squeeze().cpu())
+            auc(res.to(float), sudoku_label.cpu())
             res = isValidSudokuDist(result.value.detach(), max_dist).squeeze().cpu()
-            accuracyDist(res, s.value.squeeze().cpu())
-            aucDist(res, s.value.squeeze().cpu())
+            accuracyDist(res, sudoku_label.squeeze().cpu())
+            aucDist(res, sudoku_label.squeeze().cpu())
 
             # auc(result.value.reshape(-1, n_classes).softmax(-1).cpu(), labels.reshape(-1).cpu())
 
@@ -337,11 +360,6 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs)
         accuracy.reset()
         points_auc.reset()
         # auc.reset()
-
-    # Test metrics
-    test_auc = torchmetrics.AUROC(task="multiclass", num_classes=n_classes)
-    test_points_auc = torchmetrics.AUROC(task="binary", num_classes=1)
-    test_accuracy = torchmetrics.Accuracy(task="multiclass", num_classes=2)
 
     with torch.no_grad():
         cnn.eval()

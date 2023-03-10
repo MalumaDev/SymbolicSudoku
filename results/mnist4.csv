@@ -1,6 +1,0 @@
-epoch,train_loss,train_auc,train_points_auc,train_accuracy,test_auc,test_points_auc,test_accuracy,test_accuracyDist,test_aucDist,train_accuracyDist,train_aucDist
-0,0.7928180539011955,,tensor(0.2481),tensor(0.5233),,tensor(0.3159),tensor(0.4810),tensor(0.4835),tensor(0.4941),tensor(0.4798),tensor(0.4729)
-1,0.8078414518475533,,tensor(0.0078),tensor(0.8106),,tensor(0.3221),tensor(0.4887),tensor(0.4834),tensor(0.4969),tensor(0.4531),tensor(0.4177)
-2,0.8106844282865524,,tensor(0.0035),tensor(0.8829),,tensor(0.3253),tensor(0.4936),tensor(0.4830),tensor(0.4982),tensor(0.4430),tensor(0.3843)
-3,0.8145720504641533,,tensor(0.0023),tensor(0.9078),,tensor(0.3278),tensor(0.4949),tensor(0.4828),tensor(0.4984),tensor(0.4376),tensor(0.3614)
-4,0.8170133913695812,,tensor(0.0016),tensor(0.9240),,tensor(0.3284),tensor(0.4955),tensor(0.4827),tensor(0.4987),tensor(0.4341),tensor(0.3439)
