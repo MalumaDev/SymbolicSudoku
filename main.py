@@ -13,6 +13,7 @@ import torchmetrics
 from torch import nn
 from torch.nn import functional as F
 from tqdm import trange
+import numpy as np
 
 from make_dataloader import get_loaders
 
@@ -229,7 +230,153 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs,
 
             step_func = func
         case 1:
-            pass
+            def CheckAllDifferent(result):              
+                size = int(np.cbrt(result.shape[-1]))
+                result = result.reshape(result.shape[0], size, size, size)
+                output = [True for i in range(result.shape[0])]
+                output = torch.tensor(output)
+                result_t = result.clone().transpose(1, 2)
+                for x in range(size):   
+                  row = torch.argmax(result[:, x], dim=-1) 
+                  col = torch.argmax(result_t[:, x], dim=-1)               
+                  for n in range(size):
+                    output = torch.logical_and(output, torch.any(row==n, dim=-1))
+                    output = torch.logical_and(output, torch.any(col==n, dim=-1))
+                
+                grid_size = int(np.sqrt(size))
+                for x1 in range(grid_size):   
+                  for y1 in range(grid_size): 
+                    square = torch.argmax(result[:, x1 * grid_size :x1 * grid_size + grid_size,  y1 * grid_size :y1 * grid_size + grid_size], dim=-1) 
+                    square = square.view(square.shape[0], -1)
+                    for n in range(size):
+                      output = torch.logical_and(output, torch.any(square==n, dim=-1))
+
+                return output
+
+            class SudokuNet(nn.Module):
+              def __init__(self, n_classes, training=True):
+                  super().__init__()
+                  self.n_classes = n_classes
+                  self.training = training
+
+                  self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+                  self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+                  self.conv2_drop = nn.Dropout2d()
+                  self.fc1 = nn.Linear(320, 50)
+                  self.fc2 = nn.Linear(50, self.n_classes)
+                  self.fc3 = nn.Linear(5120, 320)
+                  self.fc4 = nn.Linear(320, 2)
+
+                  self.Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
+                  self.Implies = ltn.Connective(ltn.fuzzy_ops.ImpliesReichenbach())
+
+                  self.Forall = ltn.Quantifier(ltn.fuzzy_ops.AggregPMeanError(p=2), quantifier="f")
+                  self.Exists = ltn.Quantifier(ltn.fuzzy_ops.AggregPMean(p=2), quantifier="e")
+
+                  self.x = ltn.Variable("x", torch.tensor(range(n_classes)))
+                  self.y = ltn.Variable("y", torch.tensor(range(n_classes)))
+                  self.correct = ltn.Constant(torch.tensor([0, 1]))
+                  self.wrong = ltn.Constant(torch.tensor([1, 0]))
+
+                  self.Digit = ltn.Predicate(model=Predicate())
+                  self.Puzzle = ltn.Predicate(model=Predicate())
+
+                  self.Rules = ltn.Predicate(func=CheckAllDifferent)
+
+              def forward(self, x, labels, sudoku_label):
+                  original_batch_size = x.shape[0]
+
+                  # transforms.ToPILImage()(x[0][0]).show()
+                  x = x.reshape(-1, 1, 28, 28)
+
+                  x = F.relu(F.max_pool2d(self.conv1(x), 2))
+                  x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+                  y = x.clone().view(original_batch_size, -1)
+                  x = x.view(-1, 320)
+                  x = F.relu(self.fc1(x))
+                  x = F.dropout(x, training=self.training)
+                  x = self.fc2(x)
+                  y = F.relu(self.fc3(y))
+                  y = F.dropout(y, training=self.training)
+
+                  y = self.fc4(y)
+                  digits_pred1 = x.reshape(-1, self.n_classes) 
+                  digits_pred2 = x.clone().reshape(original_batch_size, -1)   
+                  puzzle_pred = y      
+                  
+                  labels = ltn.Variable("labels", nn.functional.one_hot(labels, self.n_classes).reshape(-1, self.n_classes))
+                  sudoku_label = ltn.Variable("sudoku_label", nn.functional.one_hot(sudoku_label, 2))
+
+                  digits = ltn.Variable("digits", digits_pred1)
+                  digits_rules = ltn.Variable("digits_rules", digits_pred2)
+                  puzzle = ltn.Variable("puzzle", puzzle_pred)
+
+                  if self.training:
+                    P1 = self.Forall(ltn.diag(digits, labels),
+                          self.Digit(digits, labels)).value
+                  
+                  P2 = self.Forall(ltn.diag(puzzle, sudoku_label),
+                        self.Puzzle(puzzle, sudoku_label)).value
+
+
+                  P3 = self.Forall(ltn.diag(sudoku_label, digits_rules),
+                                  self.Rules(digits_rules),
+                           cond_vars=[sudoku_label],
+                           cond_fn=lambda s: (s.value == self.wrong.value)[:, 0],
+                           ).value    
+
+                  P4 = self.Forall(ltn.diag(sudoku_label, digits_rules),
+                                  self.Not(self.Rules(digits_rules)),
+                           cond_vars=[sudoku_label],
+                           cond_fn=lambda s: (s.value == self.wrong.value)[:, 0],
+                           ).value  
+
+                  if self.training:
+                    sat = sat_agg(
+                      P1,
+                      P2,
+                      P3,
+                      P4
+                    )
+                  else:
+                    sat = sat_agg(
+                      P2,
+                      P3,
+                      P4
+                    ) 
+                  
+                  return sat, F.softmax(digits_pred1, dim=-1).reshape(original_batch_size, -1, self.n_classes)
+                                                   
+            class Predicate(torch.nn.Module):
+              def __init__(self):
+                  super(Predicate, self).__init__()
+                  self.softmax = nn.Softmax(dim=-1)
+
+              def forward(self, x, l):
+                  x = self.softmax(x)
+                  out = torch.sum(x * l, dim=-1)
+                  return out
+
+
+            max_dist = 0.1
+            
+            sat_agg = ltn.fuzzy_ops.SatAgg()
+
+            cnn = SudokuNet(n_classes=n_classes)
+            cnn.to(device)
+            cnn.train()
+
+            optimizer = torch.optim.Adam(cnn.parameters(), lr=lr)
+
+            def func(x, labels, sudoku_label, optimizer):
+                optimizer.zero_grad()
+                sat, result = cnn(x, labels, sudoku_label)
+
+                loss = 1 - sat
+
+                return loss, result
+
+            step_func = func
         case 2:
             pass
         case _:
@@ -268,7 +415,9 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs,
             sudoku_label = sudoku_label.to(device)
 
             loss, result = step_func(x, labels, sudoku_label, optimizer)
-
+            if algorithm == 1:
+              result = ltn.Variable("result", result)
+            
             loss.backward()
             optimizer.step()
 
@@ -310,7 +459,10 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs,
 
                 s = ltn.Variable("s", sudoku_label)
 
-                result = cnn(x)
+                if not algorithm == 2:
+                  result = cnn(x)
+                else:
+                  _, result = cnn(x, labels, sudoku_label)
                 result = ltn.Variable("result", result)
 
                 res = isValidSudoku(result.value, n_classes).squeeze().cpu()
@@ -372,7 +524,10 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs,
 
             s = ltn.Variable("s", sudoku_label)
 
-            result = cnn(x)
+            if not algorithm == 2:
+              result = cnn(x)
+            else:
+              _, result = cnn(x, labels, sudoku_label)
             result = ltn.Variable("result", result)
 
             res = isValidSudoku(result.value, n_classes).squeeze().cpu()
