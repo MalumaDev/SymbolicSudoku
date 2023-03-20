@@ -20,33 +20,6 @@ from make_dataloader import get_loaders
 
 # torch.backends.cudnn.benchmark = True
 
-
-class SudokuNet(nn.Module):
-    def __init__(self, n_classes):
-        super().__init__()
-        self.n_classes = n_classes
-
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, self.n_classes)
-
-    def forward(self, x):
-        original_batch_size = x.shape[0]
-
-        # transforms.ToPILImage()(x[0][0]).show()
-        x = x.reshape(-1, 1, 28, 28)
-
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
-        x = self.fc2(x)
-        return F.softmax(x, dim=-1).reshape(original_batch_size, -1, self.n_classes)
-
-
 def isValidSudoku(board, n_classes):
     board2 = F.one_hot(board.argmax(dim=-1), num_classes=n_classes).view(-1, n_classes, n_classes, n_classes)
     sqrt_classes = int(math.sqrt(n_classes))
@@ -187,6 +160,31 @@ def main(split, batch_size, lr, log_interval, dataset, generate_dataset, epochs,
 
     match algorithm:
         case 0:
+            class SudokuNet(nn.Module):
+                def __init__(self, n_classes):
+                    super().__init__()
+                    self.n_classes = n_classes
+
+                    self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+                    self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+                    self.conv2_drop = nn.Dropout2d()
+                    self.fc1 = nn.Linear(320, 50)
+                    self.fc2 = nn.Linear(50, self.n_classes)
+
+                def forward(self, x):
+                    original_batch_size = x.shape[0]
+
+                    # transforms.ToPILImage()(x[0][0]).show()
+                    x = x.reshape(-1, 1, 28, 28)
+
+                    x = F.relu(F.max_pool2d(self.conv1(x), 2))
+                    x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+                    x = x.view(-1, 320)
+                    x = F.relu(self.fc1(x))
+                    x = F.dropout(x, training=self.training)
+                    x = self.fc2(x)
+                    return F.softmax(x, dim=-1).reshape(original_batch_size, -1, self.n_classes)
+            
             max_dist = 0.1
 
             Not = ltn.Connective(ltn.fuzzy_ops.NotStandard())
